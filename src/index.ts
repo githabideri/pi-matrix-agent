@@ -1,9 +1,9 @@
-import { loadConfig, getControlPort, getControlHost, getControlPublicUrl } from "./config.js";
-import { PiSessionBackend } from "./pi-backend.js";
-import { MatrixTransport } from "./matrix.js";
+import { getControlHost, getControlPort, getControlPublicUrl, loadConfig } from "./config.js";
 import { ControlServer } from "./control-server.js";
-import type { IncomingMessage } from "./types.js";
+import { MatrixTransport } from "./matrix.js";
+import { PiSessionBackend } from "./pi-backend.js";
 import { routeMessage } from "./router.js";
+import type { IncomingMessage } from "./types.js";
 
 // Global crash handlers for diagnosis
 process.on("unhandledRejection", (reason, promise) => {
@@ -40,18 +40,16 @@ async function main() {
     config.accessToken,
     config.allowedRoomIds,
     config.botUserId,
-    config.storageFile
+    config.storageFile,
   );
 
   // Create control server
   const controlPort = getControlPort();
   const controlHost = getControlHost();
-  const controlServer = new ControlServer(
-    piBackend,
-    config.workingDirectory || process.cwd(),
-    config.sessionBaseDir,
-    { port: controlPort, host: controlHost }
-  );
+  const controlServer = new ControlServer(piBackend, config.workingDirectory || process.cwd(), config.sessionBaseDir, {
+    port: controlPort,
+    host: controlHost,
+  });
 
   const controlUrl = `http://${controlHost}:${controlPort}`;
   const controlPublicUrl = getControlPublicUrl(config);
@@ -81,8 +79,12 @@ async function main() {
   // Start control server first
   await controlServer.start();
 
-  // Start Matrix transport
-  await transport.start();
+  // Start Matrix transport (unless disabled for smoke tests)
+  if (process.env.ENABLE_MATRIX !== "false") {
+    await transport.start();
+  } else {
+    console.log("[Control-only mode] Matrix transport disabled");
+  }
 
   console.log("pi-matrix-agent running");
 

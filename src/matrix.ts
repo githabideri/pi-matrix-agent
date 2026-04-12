@@ -1,8 +1,7 @@
-import { MatrixClient, SimpleFsStorageProvider, AutojoinRoomsMixin } from "matrix-bot-sdk";
+import { MatrixClient, SimpleFsStorageProvider } from "matrix-bot-sdk";
 import type { IncomingMessage, ReplySink } from "./types.js";
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
-export type TypingHook = (roomId: string, typing: boolean) => Promise<void>;
 
 export class MatrixTransport implements ReplySink {
   private client: MatrixClient;
@@ -10,19 +9,18 @@ export class MatrixTransport implements ReplySink {
   private storagePath: string;
   private messageHandler?: MessageHandler;
   private userId: string;
-  private typingHook?: TypingHook;
 
   constructor(
     homeserverUrl: string,
     accessToken: string,
     allowedRoomIds: string[],
     userId: string,
-    storagePath: string = ".matrix-storage"
+    storagePath: string = ".matrix-storage",
   ) {
     this.allowedRoomIds = allowedRoomIds;
     this.storagePath = storagePath;
     this.userId = userId;
-    
+
     // Create client with storage provider
     const storage = new SimpleFsStorageProvider(this.storagePath);
     this.client = new MatrixClient(homeserverUrl, accessToken, storage);
@@ -30,13 +28,6 @@ export class MatrixTransport implements ReplySink {
 
   onMessage(handler: MessageHandler): void {
     this.messageHandler = handler;
-  }
-
-  /**
-   * Set a hook for typing feedback.
-   */
-  onTyping(hook: TypingHook): void {
-    this.typingHook = hook;
   }
 
   /**
@@ -87,7 +78,9 @@ export class MatrixTransport implements ReplySink {
 
     // Set up listeners BEFORE starting
     this.client.on("room.message", async (roomId: string, event: any) => {
-      console.log(`[MatrixTransport] Received message in ${roomId} from ${event.sender}: ${event.content?.body?.slice(0, 50)}`);
+      console.log(
+        `[MatrixTransport] Received message in ${roomId} from ${event.sender}: ${event.content?.body?.slice(0, 50)}`,
+      );
       // Filter to allowed rooms only
       if (!this.allowedRoomIds.includes(roomId)) {
         console.log(`[MatrixTransport] Ignoring - room not allowed`);
@@ -121,11 +114,7 @@ export class MatrixTransport implements ReplySink {
     console.log("Matrix bot started");
   }
 
-  async reply(
-    roomId: string,
-    _eventId: string,
-    text: string
-  ): Promise<void> {
+  async reply(roomId: string, _eventId: string, text: string): Promise<void> {
     // For now, just send as a new message
     // TODO: Implement proper threaded reply later
     await this.client.sendMessage(roomId, {

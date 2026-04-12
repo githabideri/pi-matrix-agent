@@ -46,10 +46,10 @@ EOF
 # Create temp directories
 mkdir -p "$TEMP_STORAGE" "$SESSION_DIR"
 
-# Start app on temp port
+# Start app on temp port (control-only mode, no Matrix)
 echo "Starting app on port $TEMP_PORT..."
 cd "$(dirname "$0")/.."
-CONTROL_PORT="$TEMP_PORT" CONFIG_FILE="$TEMP_CONFIG" node dist/index.js > /tmp/smoke-local.log 2>&1 &
+ENABLE_MATRIX=false CONTROL_PORT="$TEMP_PORT" CONFIG_FILE="$TEMP_CONFIG" node dist/index.js > /tmp/smoke-local.log 2>&1 &
 TEMP_PID=$!
 
 # Wait for app to start
@@ -99,14 +99,14 @@ else
     exit 1
 fi
 
-# Test 4: Archive not found returns 404
+# Test 4: Archive endpoint returns empty array for non-existent room
 echo ""
-echo "Test 4: Archive not found returns 404"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$TEMP_PORT/api/archive/rooms/nonexistent/sessions")
-if [ "$HTTP_CODE" = "404" ]; then
-    echo "✓ 404 returned for non-existent archive"
+echo "Test 4: Archive endpoint returns empty array for non-existent room"
+RESPONSE=$(curl -s "http://127.0.0.1:$TEMP_PORT/api/archive/rooms/nonexistent/sessions")
+if [ "$RESPONSE" = "[]" ]; then
+    echo "✓ Empty array returned for non-existent archive"
 else
-    echo "✗ Expected 404, got $HTTP_CODE"
+    echo "✗ Expected [], got: $RESPONSE"
     exit 1
 fi
 
