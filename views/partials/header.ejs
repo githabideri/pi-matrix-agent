@@ -1,0 +1,19 @@
+<header>
+  <h1><%= roomKey %></h1>
+  <div class="subtitle"><%= roomId %></div>
+  <nav class="nav">
+    <a href="/room/<%= roomKey %><%= isActive('room') %>">Room</a>
+    <a href="/room/<%= roomKey %>/context<%= isActive('context') %>">Context</a>
+    <a href="/room/<%= roomKey %>/archive<%= isActive('archive') %>">Archive</a>
+  </nav>
+</header>
+
+<script>
+function isActive(page) {
+  const path = window.location.pathname;
+  if (page === 'room' && path === '/room/<%= roomKey %>') return ' class="active"';
+  if (page === 'context' && path.startsWith('/room/<%= roomKey %>/context')) return ' class="active"';
+  if (page === 'archive' && path.startsWith('/room/<%= roomKey %>/archive')) return ' class="active"';
+  return '';
+}
+</script>

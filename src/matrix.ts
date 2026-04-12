@@ -87,8 +87,10 @@ export class MatrixTransport implements ReplySink {
 
     // Set up listeners BEFORE starting
     this.client.on("room.message", async (roomId: string, event: any) => {
+      console.log(`[MatrixTransport] Received message in ${roomId} from ${event.sender}: ${event.content?.body?.slice(0, 50)}`);
       // Filter to allowed rooms only
       if (!this.allowedRoomIds.includes(roomId)) {
+        console.log(`[MatrixTransport] Ignoring - room not allowed`);
         return;
       }
 

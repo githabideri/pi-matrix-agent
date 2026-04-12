@@ -5,6 +5,12 @@ import { buildContextManifest, manifestToResponse } from "./context-manifest.js"
 import { parseSessionMetadata, getRelativeSessionPath } from "./room-state.js";
 import { routeLive } from "./routes/live.js";
 import { routeArchive } from "./routes/archive.js";
+import { routeWebUI } from "./routes/webui.js";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface ControlServerOptions {
   port?: number;
@@ -33,6 +39,14 @@ export class ControlServer {
     this.host = options?.host ?? "127.0.0.1";
 
     this.app = express();
+    
+    // Set up EJS template engine
+    this.app.set("view engine", "ejs");
+    this.app.set("views", path.join(__dirname, "../views"));
+    
+    // Serve static files
+    this.app.use("/static", express.static(path.join(__dirname, "../public")));
+    
     this.setupRoutes();
   }
 
@@ -45,63 +59,15 @@ export class ControlServer {
       res.json({ status: "ok", service: "pi-matrix-agent-control" });
     });
 
-    // Live room routes
+    // Live room routes (JSON API)
     this.app.use("/api/live/rooms", routeLive(this.piBackend, this.workingDirectory));
 
-    // Archive routes
+    // Archive routes (JSON API)
     this.app.use("/api/archive/rooms", routeArchive(this.piBackend, this.sessionBaseDir));
 
-    // Simple static file serving for UI (placeholder)
-    this.app.get("/room/:roomKey", (req: Request, res: Response) => {
-      const roomKey = req.params.roomKey;
-      const roomState = this.piBackend.getSessionByKey(roomKey);
-      
-      if (!roomState) {
-        return res.status(404).json({ error: "Room not found" });
-      }
-
-      res.json({
-        message: "UI endpoint placeholder",
-        roomKey,
-        roomId: roomState.roomId,
-        sessionId: roomState.sessionId,
-        isProcessing: roomState.isProcessing,
-      });
-    });
-
-    this.app.get("/room/:roomKey/context", async (req: Request, res: Response) => {
-      const roomKey = req.params.roomKey;
-      const roomState = this.piBackend.getSessionByKey(roomKey);
-
-      if (!roomState) {
-        return res.status(404).json({ error: "Room not found" });
-      }
-
-      try {
-        const manifest = await buildContextManifest(roomState, this.workingDirectory);
-        res.json(manifestToResponse(manifest));
-      } catch (error) {
-        console.error("Error building context manifest:", error);
-        res.status(500).json({ error: "Failed to build context manifest" });
-      }
-    });
-
-    this.app.get("/room/:roomKey/archive", async (req: Request, res: Response) => {
-      const roomKey = req.params.roomKey;
-      const roomId = this.piBackend.getRoomIdByKey(roomKey);
-
-      if (!roomId) {
-        return res.status(404).json({ error: "Room not found" });
-      }
-
-      try {
-        const archived = await this.piBackend.getArchivedSessionsForRoom(roomId);
-        res.json(archived);
-      } catch (error) {
-        console.error("Error listing archived sessions:", error);
-        res.status(500).json({ error: "Failed to list archived sessions" });
-      }
-    });
+    // WebUI routes (HTML pages)
+    console.log("[ControlServer] Mounting WebUI routes at /room");
+    this.app.use("/room", routeWebUI(this.piBackend, this.workingDirectory, this.sessionBaseDir));
   }
 
   async start(): Promise<void> {

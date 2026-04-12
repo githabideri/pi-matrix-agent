@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= roomKey %> - Pi Matrix Agent</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><%= roomKey %></h1>
+      <div class="subtitle"><%= roomId %></div>
+      <nav class="nav">
+        <a href="/room/<%= roomKey %>" class="active">Room</a>
+        <a href="/room/<%= roomKey %>/context">Context</a>
+        <a href="/room/<%= roomKey %>/archive">Archive</a>
+      </nav>
+    </header>
+
+    <% if (error) { %>
+    <div class="panel">
+      <p style="color: #dc2626;"><strong>Error:</strong> <%= error %></p>
+    </div>
+    <% } else { %>
+    <!-- Live Status Panel -->
+    <div class="panel">
+      <div class="panel-header">Live Status</div>
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-label">Room ID</span>
+          <span class="status-value mono"><%= roomId %></span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Session ID</span>
+          <span class="status-value code"><%= sessionId %></span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Model</span>
+          <span class="status-value"><%= model %></span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Working Directory</span>
+          <span class="status-value mono"><%= workingDirectory %></span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Processing</span>
+          <span class="status-value">
+            <% if (isProcessing) { %>
+              <span class="indicator indicator-yellow"></span>Yes
+            <% } else { %>
+              <span class="indicator indicator-green"></span>No
+            <% } %>
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Streaming</span>
+          <span class="status-value">
+            <% if (isStreaming) { %>
+              <span class="indicator indicator-yellow"></span>Yes
+            <% } else { %>
+              <span class="indicator indicator-green"></span>No
+            <% } %>
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Session File</span>
+          <span class="status-value mono text-small"><%= relativeSessionPath %></span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Tools</span>
+          <span class="status-value">
+            <% toolNames.forEach((tool, i) => { %>
+              <span class="code" style="margin-right: 4px;"><%= tool %></span>
+            <% }); %>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Context Manifest Summary -->
+    <div class="panel">
+      <div class="panel-header">Context Manifest</div>
+      <table class="manifest-table">
+        <tr>
+          <td>Resource Loader</td>
+          <td><span class="code"><%= resourceLoaderType %></span></td>
+        </tr>
+        <tr>
+          <td>Context Sources</td>
+          <td>
+            <% if (contextSources && contextSources.length > 0) { %>
+              <ul>
+                <% contextSources.forEach(source => { %>
+                  <li><span class="mono"><%= source %></span></li>
+                <% }); %>
+              </ul>
+            <% } else { %>
+              <span style="color: #666;">None discovered</span>
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td>Generated</td>
+          <td><span class="mono"><%= generatedAt %></span></td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Live Event Log -->
+    <div class="panel">
+      <div class="panel-header">
+        Live Events
+        <span id="connection-status" style="float: right; font-size: 12px; color: #666;">
+          <span class="indicator indicator-red"></span>Disconnected
+        </span>
+      </div>
+      <div id="event-log" class="event-log">
+        <div class="event">
+          <span class="event-time">--:--:--</span>
+          <span class="event-type">info</span>
+          <span class="event-data">Connecting to event stream...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Archive List -->
+    <div class="panel">
+      <div class="panel-header">Archived Sessions (<span id="archive-count">0</span>)</div>
+      <ul id="archive-list" class="archive-list">
+        <li class="empty-state">Loading...</li>
+      </ul>
+    </div>
+    <% } %>
+  </div>
+
+  <script>
+    // Configuration
+    const ROOM_KEY = '<%= roomKey %>';
+    const API_BASE = '/api/live/rooms/' + ROOM_KEY;
+    
+    // Event Source for SSE
+    let eventSource = null;
+    let isConnected = false;
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      startEventStream();
+      loadArchiveList();
+      autoScrollToBottom();
+      
+      // Auto-refresh status every 3 seconds
+      setInterval(refreshStatus, 3000);
+      // Auto-scroll event log every 500ms
+      setInterval(autoScrollToBottom, 500);
+    });
+    
+    // Start SSE connection
+    function startEventStream() {
+      eventSource = new EventSource(API_BASE + '/events');
+      
+      eventSource.onopen = function() {
+        isConnected = true;
+        updateConnectionStatus();
+        appendEvent('info', 'Connected to event stream');
+      };
+      
+      eventSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          handleEvent(data);
+        } catch (e) {
+          appendEvent('error', 'Parse error: ' + e.message);
+        }
+      };
+      
+      eventSource.onerror = function() {
+        isConnected = false;
+        updateConnectionStatus();
+        appendEvent('error', 'Connection lost. Reconnecting...');
+        eventSource.close();
+        // Reconnect after 3 seconds
+        setTimeout(startEventStream, 3000);
+      };
+    }
+    
+    // Handle incoming events
+    function handleEvent(data) {
+      const timeStr = new Date().toLocaleTimeString();
+      
+      switch(data.type) {
+        case 'run_start':
+          appendEvent('run', 'Run started', timeStr);
+          break;
+        case 'text_delta':
+          // Only show first 100 chars of text deltas to avoid spam
+          if (data.delta.length <= 100 || !window._suppressText) {
+            appendEvent('text', data.delta.substring(0, 200), timeStr);
+            if (data.delta.length > 100) {
+              window._suppressText = true;
+              setTimeout(() => { window._suppressText = false; }, 2000);
+            }
+          }
+          break;
+        case 'tool_start':
+          appendEvent('tool', `Tool started: ${data.toolName}`, timeStr, data);
+          break;
+        case 'tool_end':
+          const status = data.success ? '✓' : '✗';
+          appendEvent('tool', `Tool ended: ${data.toolName} ${status}`, timeStr, data);
+          break;
+        case 'run_end':
+          appendEvent('run', 'Run completed', timeStr);
+          break;
+        default:
+          appendEvent('event', data.type, timeStr, data);
+      }
+    }
+    
+    // Append event to log
+    function appendEvent(type, message, timeStr = null, data = null) {
+      const log = document.getElementById('event-log');
+      const time = timeStr || new Date().toLocaleTimeString();
+      
+      const div = document.createElement('div');
+      div.className = 'event';
+      
+      let typeClass = 'event';
+      if (type === 'run') typeClass = 'run';
+      if (type === 'tool') typeClass = 'tool';
+      if (type === 'error') typeClass = 'error';
+      
+      div.innerHTML = `
+        <span class="event-time">${time}</span>
+        <span class="event-type ${typeClass}">${type.toUpperCase()}</span>
+        <span class="event-data">${escapeHtml(message)}</span>
+      `;
+      
+      log.appendChild(div);
+    }
+    
+    // Update connection status indicator
+    function updateConnectionStatus() {
+      const status = document.getElementById('connection-status');
+      if (isConnected) {
+        status.innerHTML = '<span class="indicator indicator-green"></span>Connected';
+      } else {
+        status.innerHTML = '<span class="indicator indicator-red"></span>Disconnected';
+      }
+    }
+    
+    // Load archive list
+    function loadArchiveList() {
+      fetch('/api/archive/rooms/' + ROOM_KEY + '/sessions')
+        .then(res => res.json())
+        .then(data => {
+          const list = document.getElementById('archive-list');
+          const count = document.getElementById('archive-count');
+          
+          count.textContent = data.length;
+          
+          if (data.length === 0) {
+            list.innerHTML = '<li class="empty-state">No archived sessions yet</li>';
+            return;
+          }
+          
+          list.innerHTML = data.map(session => `
+            <li class="archive-item">
+              <a href="/room/${ROOM_KEY}/archive/${session.sessionId}">${escapeHtml(session.sessionId)}</a>
+              <div class="archive-meta">
+                ${session.timestamp ? new Date(session.timestamp).toLocaleString() : 'Unknown date'} • 
+                ${session.size ? formatBytes(session.size) : 'Unknown size'}
+              </div>
+            </li>
+          `).join('');
+        })
+        .catch(err => {
+          console.error('Failed to load archive:', err);
+          document.getElementById('archive-list').innerHTML = 
+            '<li class="empty-state">Failed to load archive</li>';
+        });
+    }
+    
+    // Refresh status from API
+    function refreshStatus() {
+      fetch(API_BASE)
+        .then(res => res.json())
+        .then(data => {
+          // Update processing indicator
+          const processingIndicator = document.querySelector('.status-item:nth-child(5) .indicator');
+          if (processingIndicator) {
+            processingIndicator.className = 'indicator ' + (data.isProcessing ? 'indicator-yellow' : 'indicator-green');
+            processingIndicator.parentElement.innerHTML = 
+              `<span class="indicator ${data.isProcessing ? 'indicator-yellow' : 'indicator-green'}"></span>${data.isProcessing ? 'Yes' : 'No'}`;
+          }
+          
+          // Update streaming indicator
+          const streamingIndicator = document.querySelector('.status-item:nth-child(6) .indicator');
+          if (streamingIndicator) {
+            streamingIndicator.className = 'indicator ' + (data.isStreaming ? 'indicator-yellow' : 'indicator-green');
+            streamingIndicator.parentElement.innerHTML = 
+              `<span class="indicator ${data.isStreaming ? 'indicator-yellow' : 'indicator-green'}"></span>${data.isStreaming ? 'Yes' : 'No'}`;
+          }
+        })
+        .catch(err => {
+          // Silently fail - status updates are not critical
+        });
+    }
+    
+    // Auto-scroll event log to bottom
+    function autoScrollToBottom() {
+      const log = document.getElementById('event-log');
+      if (log && window.getComputedStyle(log).overflowY === 'auto') {
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+    
+    // Utility: Escape HTML
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    // Utility: Format bytes
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+  </script>
+</body>
+</html>

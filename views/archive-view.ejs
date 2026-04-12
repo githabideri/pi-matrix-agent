@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= sessionId %> - Archive - <%= roomKey %> - Pi Matrix Agent</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><%= sessionId %></h1>
+      <div class="subtitle">
+        <a href="/room/<%= roomKey %>/archive" style="color: #666; text-decoration: none;">← Back to archive</a> | 
+        Room: <%= roomKey %>
+      </div>
+      <nav class="nav">
+        <a href="/room/<%= roomKey %>">Room</a>
+        <a href="/room/<%= roomKey %>/context">Context</a>
+        <a href="/room/<%= roomKey %>/archive" class="active">Archive</a>
+      </nav>
+    </header>
+
+    <% if (error) { %>
+    <div class="panel">
+      <p style="color: #dc2626;"><strong>Error:</strong> <%= error %></p>
+    </div>
+    <% } else { %>
+    <div class="panel">
+      <div class="panel-header">Session Metadata</div>
+      <table class="manifest-table">
+        <tr>
+          <td>Room ID</td>
+          <td><span class="code"><%= metadata.roomId %></span></td>
+        </tr>
+        <tr>
+          <td>Session ID</td>
+          <td><span class="code"><%= metadata.sessionId %></span></td>
+        </tr>
+        <tr>
+          <td>Timestamp</td>
+          <td><span class="mono"><%= metadata.timestamp %></span></td>
+        </tr>
+        <tr>
+          <td>File Size</td>
+          <td><%= formatBytes(metadata.size) %></td>
+        </tr>
+        <tr>
+          <td>Message Count</td>
+          <td><%= metadata.messageCount %></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Transcript</div>
+      <div class="transcript" id="transcript">
+        <% if (transcriptLines.length === 0) { %>
+        <div style="color: #666; text-align: center; padding: 20px;">
+          No transcript available for this session.
+        </div>
+        <% } else { %>
+        <% transcriptLines.forEach(line => { %>
+          <% if (line.type === 'user') { %>
+        <div class="transcript-user">USER: <%= escapeHtml(line.content) %></div>
+        <% } else if (line.type === 'assistant') { %>
+        <div class="transcript-assistant">ASSISTANT: <%= escapeHtml(line.content) %></div>
+        <% } else if (line.type === 'tool') { %>
+        <div class="transcript-tool">TOOL (<%= escapeHtml(line.name) %>): <%= escapeHtml(line.content) %></div>
+        <% } else { %>
+        <div style="color: #666;">[<%= escapeHtml(line.type) %>]: <%= escapeHtml(line.content) %></div>
+        <% } %>
+        <% }); %>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Raw JSONL</div>
+      <pre class="mono" style="background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 400px; overflow-y: auto;">
+<%= rawContent %>
+      </pre>
+    </div>
+    <% } %>
+  </div>
+  
+  <script>
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+    
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

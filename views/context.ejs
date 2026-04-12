@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Context - <%= roomKey %> - Pi Matrix Agent</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><%= roomKey %></h1>
+      <div class="subtitle"><%= roomId %></div>
+      <nav class="nav">
+        <a href="/room/<%= roomKey %>">Room</a>
+        <a href="/room/<%= roomKey %>/context" class="active">Context</a>
+        <a href="/room/<%= roomKey %>/archive">Archive</a>
+      </nav>
+    </header>
+
+    <% if (error) { %>
+    <div class="panel">
+      <p style="color: #dc2626;"><strong>Error:</strong> <%= error %></p>
+    </div>
+    <% } else { %>
+    <div class="panel">
+      <div class="panel-header">Context Manifest</div>
+      <table class="manifest-table">
+        <tr>
+          <td>Room ID</td>
+          <td><span class="code"><%= roomId %></span></td>
+        </tr>
+        <tr>
+          <td>Room Key</td>
+          <td><span class="code"><%= roomKey %></span></td>
+        </tr>
+        <tr>
+          <td>Session ID</td>
+          <td><span class="code"><%= sessionId %></span></td>
+        </tr>
+        <tr>
+          <td>Relative Session Path</td>
+          <td><span class="code"><%= relativeSessionPath %></span></td>
+        </tr>
+        <tr>
+          <td>Working Directory</td>
+          <td><span class="code"><%= workingDirectory %></span></td>
+        </tr>
+        <tr>
+          <td>Model</td>
+          <td><%= model %></td>
+        </tr>
+        <tr>
+          <td>Is Processing</td>
+          <td>
+            <% if (isProcessing) { %>
+              <span class="indicator indicator-yellow"></span>Yes
+            <% } else { %>
+              <span class="indicator indicator-green"></span>No
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td>Is Streaming</td>
+          <td>
+            <% if (isStreaming) { %>
+              <span class="indicator indicator-yellow"></span>Yes
+            <% } else { %>
+              <span class="indicator indicator-green"></span>No
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td>Resource Loader Type</td>
+          <td><span class="code"><%= resourceLoaderType %></span></td>
+        </tr>
+        <tr>
+          <td>Tool Names</td>
+          <td>
+            <% if (toolNames && toolNames.length > 0) { %>
+              <ul>
+                <% toolNames.forEach(tool => { %>
+                  <li><span class="code"><%= tool %></span></li>
+                <% }); %>
+              </ul>
+            <% } else { %>
+              <span style="color: #666;">None</span>
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td>Context Sources</td>
+          <td>
+            <% if (contextSources && contextSources.length > 0) { %>
+              <ul>
+                <% contextSources.forEach(source => { %>
+                  <li><span class="mono"><%= source %></span></li>
+                <% }); %>
+              </ul>
+            <% } else { %>
+              <span style="color: #666;">None discovered</span>
+            <% } %>
+          </td>
+        </tr>
+        <tr>
+          <td>Generated At</td>
+          <td><span class="mono"><%= generatedAt %></span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Raw JSON</div>
+      <pre class="mono" style="background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">
+<%= JSON.stringify(manifest, null, 2) %>
+      </pre>
+    </div>
+    <% } %>
+  </div>
+</body>
+</html>

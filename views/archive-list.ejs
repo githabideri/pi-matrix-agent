@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archive - <%= roomKey %> - Pi Matrix Agent</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><%= roomKey %></h1>
+      <div class="subtitle"><%= roomId %></div>
+      <nav class="nav">
+        <a href="/room/<%= roomKey %>">Room</a>
+        <a href="/room/<%= roomKey %>/context">Context</a>
+        <a href="/room/<%= roomKey %>/archive" class="active">Archive</a>
+      </nav>
+    </header>
+
+    <% if (error) { %>
+    <div class="panel">
+      <p style="color: #dc2626;"><strong>Error:</strong> <%= error %></p>
+    </div>
+    <% } else { %>
+    <div class="panel">
+      <div class="panel-header">Archived Sessions (<%= archives.length %>)</div>
+      
+      <% if (archives.length === 0) { %>
+      <div class="empty-state">
+        <p>No archived sessions yet.</p>
+        <p style="margin-top: 10px; color: #666;">
+          Sessions are archived when you use the <code>!reset</code> command in Matrix,
+          or when the session is reset via the control API.
+        </p>
+      </div>
+      <% } else { %>
+      <ul class="archive-list">
+        <% archives.forEach(session => { %>
+        <li class="archive-item">
+          <a href="/room/<%= roomKey %>/archive/<%= session.sessionId %>">
+            <span class="mono"><%= session.sessionId %></span>
+          </a>
+          <div class="archive-meta">
+            <% if (session.timestamp) { %>
+              Created: <%= new Date(session.timestamp).toLocaleString() %>
+            <% } %>
+            <% if (session.size) { %>
+              • <%= formatBytes(session.size) %>
+            <% } %>
+            <% if (session.messageCount) { %>
+              • <%= session.messageCount %> messages
+            <% } %>
+          </div>
+        </li>
+        <% }); %>
+      </ul>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+  
+  <script>
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+  </script>
+</body>
+</html>

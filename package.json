@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.66.1",
+    "ejs": "^5.0.2",
     "express": "^5.2.1",
     "matrix-bot-sdk": "^0.6.2"
   },
