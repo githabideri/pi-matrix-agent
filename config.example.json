@@ -1,0 +1,15 @@
+{
+  "homeserverUrl": "https://clawdbot.tail51128.ts.net",
+  "accessToken": "<bot-access-token>",
+  "botUserId": "@<bot-user>:<homeserver>",
+  "allowedRoomIds": ["!testRoom:matrixbot.home.macl.at"],
+  "allowedUserIds": ["@<user>:<homeserver>"],
+  "commandPrefix": "!pi",
+  "workingDirectory": "/root/homelab",
+  "sessionBaseDir": "/root/homelab/sessions/pi-matrix",
+  "storageFile": "./storage/bot.json",
+  "inferenceBaseUrl": "http://<gpu-server>:8080/v1",
+  "inferenceModel": "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf",
+  "inferenceApiKey": "local",
+  "inferenceMaxTokens": 2048
+}

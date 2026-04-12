@@ -1,0 +1,31 @@
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Runtime files
+config.json
+storage/
+sessions/
+test-storage/
+
+# Test output
+test/**/*.js
+test/**/*.d.ts
+test/**/*.js.map
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
