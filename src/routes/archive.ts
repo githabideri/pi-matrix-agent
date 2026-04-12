@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { PiSessionBackend } from "../pi-backend.js";
-import { parseSessionMetadata, extractSessionIdFromFilename } from "../room-state.js";
-import { RoomStateManager } from "../room-state.js";
+import { parseSessionMetadata, extractSessionIdFromFilename, RoomStateManager } from "../room-state.js";
+import { parseSessionFile } from "../transcript.js";
 
 export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string) {
   const router = Router();
@@ -9,15 +9,20 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
   // GET /api/archive/rooms/:roomKey/sessions - List archived sessions for a room
   router.get("/:roomKey/sessions", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
+    
+    // First try to find the room in live rooms
     const roomId = piBackend.getRoomIdByKey(roomKey);
-
-    if (!roomId) {
-      return res.status(404).json({ error: "Room not found" });
-    }
-
+    
     try {
-      // Get archived sessions
-      const archived = await piBackend.getArchivedSessionsForRoom(roomId);
+      let archived: any[] = [];
+      
+      if (roomId) {
+        // Room is live, use existing method
+        archived = await piBackend.getArchivedSessionsForRoom(roomId);
+      } else {
+        // Room might be archived - search in the room directory directly
+        archived = await findArchivedSessionsInRoomDir(roomKey, sessionBaseDir);
+      }
 
       // Format response
       const result = archived.map((session) => ({
@@ -37,15 +42,10 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
   router.get("/:roomKey/sessions/:sessionId", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const sessionId = req.params.sessionId;
-    const roomId = piBackend.getRoomIdByKey(roomKey);
-
-    if (!roomId) {
-      return res.status(404).json({ error: "Room not found" });
-    }
 
     try {
-      // Find the session file for this session ID
-      const sessionFile = await findSessionFileBySessionId(roomId, sessionId, sessionBaseDir);
+      // Find the session file directly in the room directory
+      const sessionFile = await findSessionFileInRoomDir(roomKey, sessionId, sessionBaseDir);
 
       if (!sessionFile) {
         return res.status(404).json({ error: "Session not found" });
@@ -70,59 +70,23 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
   router.get("/:roomKey/sessions/:sessionId/transcript", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const sessionId = req.params.sessionId;
-    const roomId = piBackend.getRoomIdByKey(roomKey);
-
-    if (!roomId) {
-      return res.status(404).json({ error: "Room not found" });
-    }
 
     try {
-      const sessionFile = await findSessionFileBySessionId(roomId, sessionId, sessionBaseDir);
+      // Find the session file directly in the room directory
+      const sessionFile = await findSessionFileInRoomDir(roomKey, sessionId, sessionBaseDir);
 
       if (!sessionFile) {
         return res.status(404).json({ error: "Session not found" });
       }
 
-      const fs = await import("fs/promises");
-      const content = await fs.readFile(sessionFile, "utf-8");
-      const lines = content.trim().split("\n");
+      // Use the new normalized transcript parser
+      const transcript = await parseSessionFile(sessionFile, { baseDir: sessionBaseDir });
 
-      const messages: Array<{ role: string; content: string; timestamp?: string }> = [];
+      // Add room context
+      transcript.roomKey = roomKey;
+      transcript.sessionFile = sessionFile;
 
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line);
-          
-          // Session header
-          if (entry.type === "session") {
-            continue;
-          }
-
-          // Model/thinking level changes
-          if (entry.type === "model_change" || entry.type === "thinking_level_change") {
-            continue;
-          }
-
-          // Messages
-          if (entry.type === "message" && entry.message) {
-            const msg = entry.message;
-            const content = extractMessageContent(msg.content);
-            messages.push({
-              role: msg.role,
-              content,
-              timestamp: entry.timestamp,
-            });
-          }
-        } catch {
-          // Skip invalid lines
-        }
-      }
-
-      res.json({
-        sessionId,
-        messageCount: messages.length,
-        messages,
-      });
+      res.json(transcript);
     } catch (error) {
       console.error(`Error getting transcript for ${roomKey}/${sessionId}:`, error);
       res.status(500).json({ error: "Failed to get transcript" });
@@ -141,24 +105,16 @@ function getRelativePath(sessionFile: string, baseDir: string): string {
 }
 
 /**
- * Find session file by session ID within a room's directory.
+ * Find session file by session ID within a room's directory (given roomKey).
  */
-async function findSessionFileBySessionId(
-  roomId: string,
+async function findSessionFileInRoomDir(
+  roomKey: string,
   sessionId: string,
   sessionBaseDir: string
 ): Promise<string | null> {
   const fs = await import("fs/promises");
   const path = await import("path");
 
-  // Hash room ID to get room directory
-  let hash = 0;
-  for (let i = 0; i < roomId.length; i++) {
-    const char = roomId.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  const roomKey = Math.abs(hash).toString(16);
   const roomSessionDir = path.join(sessionBaseDir, `room-${roomKey}`);
 
   try {
@@ -180,24 +136,54 @@ async function findSessionFileBySessionId(
 }
 
 /**
- * Extract content text from message content array.
+ * Find session file by session ID within a room's directory (given roomId).
+ * Kept for backwards compatibility with live room lookups.
  */
-function extractMessageContent(content: any): string {
-  if (!content) return "";
-  
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content.map((item: any) => {
-      if (item.type === "text") return item.text || "";
-      if (item.type === "thinking") return `[thinking: ${item.thinking || "..."}]`;
-      if (item.type === "toolCall") return `[tool_call: ${item.name}]`;
-      if (item.type === "toolResult") return `[tool_result: ${item.name}]`;
-      return String(item);
-    }).join("\n");
-  }
-
-  return String(content);
+async function findSessionFileBySessionId(
+  roomId: string,
+  sessionId: string,
+  sessionBaseDir: string
+): Promise<string | null> {
+  const roomKey = RoomStateManager.hashRoomId(roomId);
+  return findSessionFileInRoomDir(roomKey, sessionId, sessionBaseDir);
 }
+
+/**
+ * Find archived sessions in a room directory.
+ */
+async function findArchivedSessionsInRoomDir(
+  roomKey: string,
+  sessionBaseDir: string
+): Promise<any[]> {
+  const fs = await import("fs/promises");
+  const path = await import("path");
+
+  const roomSessionDir = path.join(sessionBaseDir, `room-${roomKey}`);
+  const results: any[] = [];
+
+  try {
+    const entries = await fs.readdir(roomSessionDir);
+    
+    for (const entry of entries) {
+      if (entry.endsWith(".jsonl")) {
+        const sessionFile = path.join(roomSessionDir, entry);
+        try {
+          const metadata = await parseSessionMetadata(sessionFile, sessionBaseDir);
+          results.push({
+            id: metadata.sessionId,
+            path: sessionFile,
+            firstMessage: metadata.firstMessage,
+          });
+        } catch {
+          // Skip invalid files
+        }
+      }
+    }
+  } catch {
+    // Directory might not exist
+  }
+
+  return results;
+}
+
+

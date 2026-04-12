@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { PiSessionBackend } from "../pi-backend.js";
 import { buildContextManifest, manifestToResponse } from "../context-manifest.js";
 import { getRelativeSessionPath } from "../room-state.js";
+import { buildLiveTranscript } from "../transcript.js";
 
 export function routeLive(piBackend: PiSessionBackend, workingDirectory: string) {
   const router = Router();
@@ -56,6 +57,34 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
     } catch (error) {
       console.error(`Error building context manifest for ${roomKey}:`, error);
       res.status(500).json({ error: "Failed to build context manifest" });
+    }
+  });
+
+  // GET /api/live/rooms/:roomKey/transcript - Get live session transcript
+  router.get("/:roomKey/transcript", async (req: Request, res: Response) => {
+    const roomKey = req.params.roomKey;
+    const roomState = piBackend.getSessionByKey(roomKey);
+
+    if (!roomState) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    try {
+      const transcript = await buildLiveTranscript(
+        roomState.sessionId || "",
+        roomState.sessionFile,
+        { baseDir: workingDirectory }
+      );
+
+      // Add room context
+      transcript.roomId = roomState.roomId;
+      transcript.roomKey = roomKey;
+      transcript.sessionFile = roomState.sessionFile;
+
+      res.json(transcript);
+    } catch (error) {
+      console.error(`Error getting transcript for ${roomKey}:`, error);
+      res.status(500).json({ error: "Failed to get transcript" });
     }
   });
 
