@@ -65,9 +65,24 @@ export class ControlServer {
     // Archive routes (JSON API)
     this.app.use("/api/archive/rooms", routeArchive(this.piBackend, this.sessionBaseDir));
 
-    // WebUI routes (HTML pages)
+    // WebUI routes (HTML pages - EJS fallback)
     console.log("[ControlServer] Mounting WebUI routes at /room");
     this.app.use("/room", routeWebUI(this.piBackend, this.workingDirectory, this.sessionBaseDir));
+
+    // Preview frontend routes (/app/room/:roomKey)
+    console.log("[ControlServer] Mounting preview frontend at /app/room");
+    
+    // Serve built frontend assets
+    const frontendDistPath = path.join(__dirname, "../frontend/operator-ui/dist");
+    this.app.use("/app", express.static(frontendDistPath));
+    
+    // Preview room page
+    this.app.get("/app/room/:roomKey", (req: Request, res: Response) => {
+      const roomKey = req.params.roomKey;
+      // Inject roomKey into the page
+      let html = "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Room: " + roomKey + "</title></head><body><div id='app'></div><script>\nwindow.ROOM_KEY = \"" + roomKey + "\";</script><script type='module' src='/app/assets/index-BppihHQ8.js'></script></body></html>";
+      res.type("html").send(html);
+    });
   }
 
   async start(): Promise<void> {
