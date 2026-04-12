@@ -2,6 +2,7 @@ import { MatrixClient, SimpleFsStorageProvider, AutojoinRoomsMixin } from "matri
 import type { IncomingMessage, ReplySink } from "./types.js";
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
+export type TypingHook = (roomId: string, typing: boolean) => Promise<void>;
 
 export class MatrixTransport implements ReplySink {
   private client: MatrixClient;
@@ -9,6 +10,7 @@ export class MatrixTransport implements ReplySink {
   private storagePath: string;
   private messageHandler?: MessageHandler;
   private userId: string;
+  private typingHook?: TypingHook;
 
   constructor(
     homeserverUrl: string,
@@ -28,6 +30,56 @@ export class MatrixTransport implements ReplySink {
 
   onMessage(handler: MessageHandler): void {
     this.messageHandler = handler;
+  }
+
+  /**
+   * Set a hook for typing feedback.
+   */
+  onTyping(hook: TypingHook): void {
+    this.typingHook = hook;
+  }
+
+  /**
+   * Set typing indicator for a room.
+   * Matrix typing events timeout after ~28 seconds, so for long operations
+   * the caller should call this periodically or use startTypingLoop.
+   */
+  async setTyping(roomId: string, typing: boolean): Promise<void> {
+    try {
+      if (typing) {
+        await this.client.setTyping(roomId, true, 0);
+      } else {
+        await this.client.setTyping(roomId, false, 0);
+      }
+    } catch (error) {
+      // Typing events are best-effort
+      console.debug(`[MatrixTransport] Error setting typing for ${roomId}:`, error);
+    }
+  }
+
+  /**
+   * Start a typing feedback loop that refreshes typing indicator periodically.
+   * Call setTyping(false) to stop the loop.
+   */
+  startTypingLoop(roomId: string): NodeJS.Timeout {
+    // Set typing immediately
+    this.setTyping(roomId, true);
+
+    // Refresh every 20 seconds (Matrix timeout is ~28 seconds)
+    const interval = setInterval(() => {
+      this.setTyping(roomId, true).catch((err) => {
+        console.debug(`[MatrixTransport] Error refreshing typing for ${roomId}:`, err);
+      });
+    }, 20000);
+
+    return interval;
+  }
+
+  /**
+   * Stop typing feedback loop.
+   */
+  stopTypingLoop(interval: NodeJS.Timeout): void {
+    clearInterval(interval);
   }
 
   async start(): Promise<void> {

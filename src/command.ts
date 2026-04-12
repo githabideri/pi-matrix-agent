@@ -24,6 +24,8 @@ export function parseCommand(body: string): ParsedCommand {
         return { kind: "command_help" };
       case "session":
         return { kind: "command_session" };
+      case "control":
+        return { kind: "command_control" };
       default:
         // Unknown command -> help
         return { kind: "command_help" };

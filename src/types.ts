@@ -11,6 +11,7 @@ export type ParsedCommand =
   | { kind: "command_status" }
   | { kind: "command_reset" }
   | { kind: "command_session" }
+  | { kind: "command_control" }
   | { kind: "chat_prompt"; prompt: string };
 
 export interface AgentBackend {
