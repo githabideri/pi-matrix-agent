@@ -32,7 +32,7 @@ export function getControlPort(): number {
   const envPort = process.env.CONTROL_PORT;
   if (envPort) {
     const parsed = parseInt(envPort, 10);
-    if (!isNaN(parsed)) {
+    if (!Number.isNaN(parsed)) {
       return parsed;
     }
   }

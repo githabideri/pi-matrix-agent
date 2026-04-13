@@ -4,6 +4,33 @@ This document describes how to develop, test, build, and deploy the pi-matrix-ag
 
 ---
 
+## Matrix API Integration
+
+For programmatic interaction with the Matrix bot (testing, automation, sending messages):
+
+**See [docs/matrix-api.md](docs/matrix-api.md)** for:
+- How to get an access token
+- Sending messages via Matrix Client API
+- Python/Node.js examples
+- Environment variable setup
+
+Quick example:
+
+```bash
+# Set up environment variables (see .env.example)
+export MATRIX_HOMESERVER="http://your-homeserver:8008"
+export MATRIX_ACCESS_TOKEN="your-token"
+export MATRIX_ROOM_ID="!roomid:example.com"
+
+# Send a test message
+curl -X POST "$MATRIX_HOMESERVER/_matrix/client/r0/rooms/$MATRIX_ROOM_ID/send/m.room.message" \
+  -H "Authorization: Bearer $MATRIX_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"msgtype":"m.text","body":"Hello, bot!"}'
+```
+
+---
+
 ## Architecture Overview
 
 ### Source of Truth

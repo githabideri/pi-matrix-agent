@@ -1,18 +1,44 @@
 #!/bin/bash
 # smoke-matrix.sh - Live Matrix smoke test
 # Tests: prompt, memory, !control, !reset, fresh session, archive
+#
+# Usage: source .env.matrix && ./scripts/smoke-matrix.sh
+# Or set environment variables manually
 
 set -e
 
-# Configuration - set these via env vars or update defaults
-MATRIX_URL="${MATRIX_URL:-http://192.168.0.36:8008}"
-MATRIX_TOKEN="${MATRIX_TOKEN:-syt_bG9jbW94_fcJIywweapsguaRGUVTK_3ZTtSD}"
-TEST_ROOM="${TEST_ROOM:-!ZqbmhmaXDWWgORmNfF:matrixbot.home.macl.at}"
+# Load environment from .env.matrix if it exists
+if [ -f .env.matrix ]; then
+    echo "Loading environment from .env.matrix..."
+    set -a
+    source .env.matrix
+    set +a
+fi
+
+# Configuration - use env vars with fallbacks
+MATRIX_URL="${MATRIX_URL:-${MATRIX_HOMESERVER:-http://localhost:8008}}"
+MATRIX_TOKEN="${MATRIX_TOKEN:-${MATRIX_ACCESS_TOKEN:-}}"
+TEST_ROOM="${TEST_ROOM:-${MATRIX_ROOM_ID:-}}"
 CONTROL_URL="${CONTROL_URL:-http://127.0.0.1:9000}"
-CONTROL_PUBLIC_URL="${CONTROL_PUBLIC_URL:-https://pi-prototype.tail51128.ts.net}"
+CONTROL_PUBLIC_URL="${CONTROL_PUBLIC_URL:-http://127.0.0.1:9000}"
 
 # Timeout for waiting for bot response (seconds)
 RESPONSE_TIMEOUT=30
+
+# Validate required variables
+if [ -z "$MATRIX_TOKEN" ]; then
+    echo "ERROR: MATRIX_TOKEN or MATRIX_ACCESS_TOKEN is not set"
+    echo "Set these in .env.matrix or export them:"
+    echo "  export MATRIX_ACCESS_TOKEN='your-token-here'"
+    exit 1
+fi
+
+if [ -z "$TEST_ROOM" ]; then
+    echo "ERROR: TEST_ROOM or MATRIX_ROOM_ID is not set"
+    echo "Set these in .env.matrix or export them:"
+    echo "  export MATRIX_ROOM_ID='!roomid:example.com'"
+    exit 1
+fi
 
 echo "=== smoke-matrix.sh ==="
 echo "Testing live Matrix behavior"

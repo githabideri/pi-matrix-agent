@@ -5,14 +5,14 @@ describe("parseCommand", () => {
   it("treats plain text as chat_prompt", () => {
     expect(parseCommand("hello there")).toEqual({
       kind: "chat_prompt",
-      prompt: "hello there"
+      prompt: "hello there",
     });
   });
 
   it("treats question as chat_prompt", () => {
     expect(parseCommand("what is the capital of France?")).toEqual({
       kind: "chat_prompt",
-      prompt: "what is the capital of France?"
+      prompt: "what is the capital of France?",
     });
   });
 
@@ -47,7 +47,7 @@ describe("parseCommand", () => {
   it("trims whitespace from chat_prompt", () => {
     expect(parseCommand("  hello world  ")).toEqual({
       kind: "chat_prompt",
-      prompt: "hello world"
+      prompt: "hello world",
     });
   });
 });

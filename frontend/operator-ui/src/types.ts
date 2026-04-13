@@ -1,12 +1,7 @@
 /**
  * Transcript item types matching src/transcript.ts
  */
-export type TranscriptItemKind =
-  | "user_message"
-  | "assistant_message"
-  | "tool_start"
-  | "tool_end"
-  | "thinking";
+export type TranscriptItemKind = "user_message" | "assistant_message" | "tool_start" | "tool_end" | "thinking";
 
 export interface TranscriptItem {
   kind: TranscriptItemKind;
@@ -44,12 +39,7 @@ export interface ThinkingItem extends TranscriptItem {
   text: string;
 }
 
-export type AnyTranscriptItem =
-  | UserMessageItem
-  | AssistantMessageItem
-  | ToolStartItem
-  | ToolEndItem
-  | ThinkingItem;
+export type AnyTranscriptItem = UserMessageItem | AssistantMessageItem | ToolStartItem | ToolEndItem | ThinkingItem;
 
 export interface TranscriptResponse {
   sessionId: string;
@@ -103,13 +93,7 @@ export interface ArchiveSession {
 /**
  * SSE event types
  */
-export type SSEEventType =
-  | "run_start"
-  | "run_end"
-  | "text_delta"
-  | "tool_start"
-  | "tool_end"
-  | "state_change";
+export type SSEEventType = "run_start" | "run_end" | "text_delta" | "tool_start" | "tool_end" | "state_change";
 
 export interface SSEEvent {
   type: SSEEventType;

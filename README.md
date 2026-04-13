@@ -68,6 +68,24 @@ sudo tailscale serve --bg localhost:9000
 
 The `!control` command returns the Tailscale Serve URL for the current room.
 
+## Known Limitations
+
+### Control Plane During Inference
+
+The control server runs in the same Node.js process as the SDK. During active inference, **async operations may be blocked** because the SDK performs blocking I/O:
+
+- **Endpoints that work during inference** (read from in-memory state):
+  - `GET /` (health check)
+  - `GET /api/live/rooms` (list live rooms)
+  - `GET /api/live/rooms/:roomKey` (room details)
+  - `GET /api/live/rooms/:roomKey/context` (context manifest)
+
+- **Endpoints that may timeout during inference** (require async file I/O):
+  - `GET /api/live/rooms/:roomKey/transcript` (returns empty while processing)
+  - `GET /app/room/:roomKey` (Web UI page)
+
+**Workaround**: Poll for `isProcessing: false` before making requests that require file I/O.
+
 ## Architecture
 
 ```
@@ -338,9 +356,28 @@ See [OPERATIONS.md](OPERATIONS.md) for:
 - Troubleshooting guide
 - Verification ladder
 
+## Matrix API Integration
+
+For programmatic access to the Matrix bot (sending messages, testing, automation), see:
+- [docs/matrix-api.md](docs/matrix-api.md) - Generic guide for Matrix Client API
+- `.env.example` - Template for Matrix configuration
+
+Example: Send a test message
+
+```bash
+# Source your Matrix credentials
+source .env.matrix
+
+# Send a message to the bot
+curl -X POST "$MATRIX_HOMESERVER/_matrix/client/r0/rooms/$MATRIX_ROOM_ID/send/m.room.message" \
+  -H "Authorization: Bearer $MATRIX_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"msgtype":"m.text","body":"Hello, bot!"}'
+```
+
 ### Key Points
 
-- **Source of truth**: `/root/homelab/pi-matrix-agent` (source tree)
+- **Source of truth**: `pi-matrix-agent/` directory (source tree)
 - **Deployment config**: Separate services directory (not in repo)
 - **Single process**: Only one bot process should run at a time
 - **Control server**: Binds to `127.0.0.1` (localhost only)

@@ -1,10 +1,10 @@
-import { Router, Request, Response } from "express";
-import { PiSessionBackend } from "../pi-backend.js";
-import { buildContextManifest, manifestToResponse } from "../context-manifest.js";
-import { getRelativeSessionPath, parseSessionMetadata } from "../room-state.js";
+import { type Request, type Response, Router } from "express";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import { buildContextManifest, manifestToResponse } from "../context-manifest.js";
+import type { PiSessionBackend } from "../pi-backend.js";
+import { parseSessionMetadata } from "../room-state.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -115,7 +115,7 @@ export function routeWebUI(piBackend: PiSessionBackend, workingDirectory: string
 
     try {
       const archives = await piBackend.getArchivedSessionsForRoom(roomId);
-      
+
       res.render("archive-list", {
         roomKey,
         roomId,
@@ -172,19 +172,19 @@ export function routeWebUI(piBackend: PiSessionBackend, workingDirectory: string
 
       // Read the session file
       let rawContent = "";
-      let transcriptLines: Array<{ type: string; content: string; name?: string }> = [];
-      
+      const transcriptLines: Array<{ type: string; content: string; name?: string }> = [];
+
       try {
         rawContent = await fs.readFile(sessionFile, "utf-8");
-        
+
         // Parse JSONL into transcript lines
         const lines = rawContent.trim().split("\n");
         for (const line of lines) {
           if (!line.trim()) continue;
-          
+
           try {
             const event = JSON.parse(line);
-            
+
             if (event.type === "user_message") {
               transcriptLines.push({
                 type: "user",
@@ -208,7 +208,7 @@ export function routeWebUI(piBackend: PiSessionBackend, workingDirectory: string
                 content: `[execution: ${JSON.stringify(event.arguments || {})}]`,
               });
             }
-          } catch (e) {
+          } catch (_e) {
             // Skip invalid JSON lines
           }
         }
@@ -224,7 +224,7 @@ export function routeWebUI(piBackend: PiSessionBackend, workingDirectory: string
       } catch {}
 
       // Get metadata
-      const metadata = await parseSessionMetadata(sessionFile, sessionBaseDir);
+      const _metadata = await parseSessionMetadata(sessionFile, sessionBaseDir);
 
       res.render("archive-view", {
         sessionId,
@@ -259,13 +259,13 @@ export function routeWebUI(piBackend: PiSessionBackend, workingDirectory: string
 async function findSessionFileBySessionId(
   roomId: string,
   sessionId: string,
-  sessionBaseDir: string
+  sessionBaseDir: string,
 ): Promise<string | null> {
   // Hash room ID to get room directory
   let hash = 0;
   for (let i = 0; i < roomId.length; i++) {
     const char = roomId.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash;
   }
   const roomKey = Math.abs(hash).toString(16);
@@ -273,7 +273,7 @@ async function findSessionFileBySessionId(
 
   try {
     const entries = await fs.readdir(roomSessionDir);
-    
+
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) {
         const fileId = entry.split("_")[1]?.split(".")[0] || "";

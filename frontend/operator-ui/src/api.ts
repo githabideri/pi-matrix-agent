@@ -1,18 +1,18 @@
 /**
  * API client for the control server.
- * 
+ *
  * All endpoints are relative - the base URL is determined by the page.
  */
 
 import type {
-  LiveRoomResponse,
-  ContextManifestResponse,
-  TranscriptResponse,
   ArchiveSession,
+  ContextManifestResponse,
+  LiveRoomResponse,
   SSEEvent,
-} from './types.js';
+  TranscriptResponse,
+} from "./types.js";
 
-const API_BASE = '/api';
+const API_BASE = "/api";
 
 /**
  * Get live room details.
@@ -28,9 +28,7 @@ export async function getLiveRoom(roomKey: string): Promise<LiveRoomResponse> {
 /**
  * Get context manifest for a live room.
  */
-export async function getContextManifest(
-  roomKey: string
-): Promise<ContextManifestResponse> {
+export async function getContextManifest(roomKey: string): Promise<ContextManifestResponse> {
   const res = await fetch(`${API_BASE}/live/rooms/${roomKey}/context`);
   if (!res.ok) {
     throw new Error(`Failed to get context manifest: ${res.status} ${res.statusText}`);
@@ -66,11 +64,11 @@ export async function getArchiveSessions(roomKey: string): Promise<ArchiveSessio
  */
 export function connectEvents(roomKey: string): EventSource {
   const es = new EventSource(`${API_BASE}/live/rooms/${roomKey}/events`);
-  
+
   es.onerror = (event) => {
     console.error(`SSE error for room ${roomKey}:`, event);
   };
-  
+
   return es;
 }
 

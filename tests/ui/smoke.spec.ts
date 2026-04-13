@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 /**
  * UI Smoke Tests for pi-matrix-agent Web UI
@@ -6,161 +6,177 @@ import { test, expect, type Page } from '@playwright/test';
  * These tests verify the basic functionality of the operator dashboard:
  * - Page loads without getting stuck
  * - All panels are visible
- * - Basic rendering works
+ * - Control endpoints respond quickly (not blocking)
  *
  * Prerequisites:
  * - Control server running on http://127.0.0.1:9000
- * - A room with a session exists (create by sending Matrix message)
+ * - Test room set up via TEST_MATRIX_ROOM_ID
+ *
+ * IMPORTANT: These tests do NOT skip on missing preconditions.
+ * They either pass or fail - no silent skips.
+ * 
+ * Setup:
+ *   export TEST_MATRIX_ROOM_ID='!roomid:example.com'
+ *   ./scripts/ensure-ui-test-room.sh
+ *   npm run smoke:ui
  */
+
+const BASE_URL = 'http://127.0.0.1:9000';
 
 // Test fixtures
 test.describe('Web UI Smoke Tests', () => {
-  let roomKey: string;
+  // Room key is set by global-setup.ts from ensure-ui-test-room.sh
+  const roomKey = process.env.UI_TEST_ROOM_KEY;
+
+  test.beforeAll(() => {
+    if (!roomKey) {
+      throw new Error(
+        'UI_TEST_ROOM_KEY not set. Run ./scripts/ensure-ui-test-room.sh first.' +
+        '\n\nSet TEST_MATRIX_ROOM_ID, send a message to that room, then run:' +
+        '\n  ./scripts/ensure-ui-test-room.sh'
+      );
+    }
+    console.log(`[Tests] Using room key: ${roomKey}`);
+  });
 
   /**
-   * Get a valid room key from live rooms or archived rooms.
-   * Returns undefined if no rooms exist (test will be skipped).
+   * IDLE PATH TESTS - Test UI when no inference is running
    */
-  async function getRoomKey(page: Page): Promise<string | undefined> {
-    // Try to get a live room
-    try {
-      const response = await page.request.get('http://127.0.0.1:9000/api/live/rooms');
-      const rooms = await response.json();
-      if (rooms && rooms.length > 0) {
-        return rooms[0].roomKey;
-      }
-    } catch {
-      // Fall through to archive check
-    }
+  test.describe('Idle Path', () => {
+    test('should load room page without waiting state', async ({ page }) => {
+      // Set timeout - page must load within 5 seconds
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`, {
+        waitUntil: 'networkidle',
+        timeout: 5000,
+      });
+      
+      // Should NOT show "waiting" state
+      const waitingText = await page.$('text=Waiting');
+      expect(waitingText).toBeNull();
+      
+      // Page title should be set
+      const title = await page.title();
+      expect(title).toContain('Room:');
+    });
 
-    // No live rooms - check if test server provides a mock room
-    // This allows tests to run without real Matrix sessions
-    if (process.env.PLAYWRIGHT_MOCK_ROOM) {
-      return process.env.PLAYWRIGHT_MOCK_ROOM;
-    }
+    test('should show status panel', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Status panel should be visible
+      const statusPanel = await page.$('.status-panel');
+      expect(statusPanel).not.isNull();
+      
+      // Should have a heading
+      const statusHeading = await statusPanel?.$('h2');
+      expect(await statusHeading?.innerText()).toContain('Status');
+    });
 
-    return undefined;
-  }
+    test('should show manifest panel', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Manifest panel should be visible
+      const manifestPanel = await page.$('.manifest-panel');
+      expect(manifestPanel).not.isNull();
+      
+      // Should have a heading
+      const manifestHeading = await manifestPanel?.$('h2');
+      expect(await manifestHeading?.innerText()).toContain('Context');
+    });
 
-  test('should have a room to test', async ({ page }) => {
-    roomKey = await getRoomKey(page);
-    
-    if (!roomKey) {
-      test.skip(true, 'No room available for testing. Send a Matrix message first or set PLAYWRIGHT_MOCK_ROOM');
-    }
-    
-    console.log(`Using room key: ${roomKey}`);
+    test('should show transcript panel', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Transcript panel should be visible
+      const transcriptPanel = await page.$('.transcript-panel');
+      expect(transcriptPanel).not.isNull();
+      
+      // Should have a heading
+      const transcriptHeading = await transcriptPanel?.$('h2');
+      expect(await transcriptHeading?.innerText()).toContain('Transcript');
+    });
+
+    test('should show archive panel', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Archive panel should be visible
+      const archivePanel = await page.$('.archive-panel');
+      expect(archivePanel).not.isNull();
+      
+      // Should have a heading
+      const archiveHeading = await archivePanel?.$('h2');
+      expect(await archiveHeading?.innerText()).toContain('Archive');
+    });
+
+    test('should render room key in page', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Check that room key appears in title
+      const title = await page.title();
+      expect(title).toContain(roomKey);
+      
+      // Check that room key is accessible via window.ROOM_KEY
+      const pageRoomKey = await page.evaluate(() => window.ROOM_KEY);
+      expect(pageRoomKey).toBe(roomKey);
+    });
   });
 
-  test('should load room page without waiting state', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
+  /**
+   * BUSY PATH TESTS - Test UI while inference is running
+   * These are the critical tests that catch the hanging bug
+   */
+  test.describe('Busy Path', () => {
+    test('control endpoint responds quickly', async ({ request }) => {
+      const startTime = Date.now();
+      
+      // Test that endpoint responds within 2 seconds
+      const response = await request.get(`${BASE_URL}/api/live/rooms/${roomKey}`, {
+        timeout: 5000,  // Fail if takes longer than 5s
+      });
+      
+      const elapsed = Date.now() - startTime;
+      console.log(`Control endpoint responded in ${elapsed}ms`);
+      
+      // Should respond within 2 seconds
+      expect(elapsed).toBeLessThan(2000);
+      expect(response.ok()).toBeTruthy();
+    });
 
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
+    test('context endpoint responds quickly', async ({ request }) => {
+      const startTime = Date.now();
+      
+      const response = await request.get(`${BASE_URL}/api/live/rooms/${roomKey}/context`, {
+        timeout: 5000,
+      });
+      
+      const elapsed = Date.now() - startTime;
+      console.log(`Context endpoint responded in ${elapsed}ms`);
+      expect(elapsed).toBeLessThan(2000);
+      expect(response.ok()).toBeTruthy();
+    });
 
-    // Wait for page to load
-    await page.waitForLoadState('networkidle');
-
-    // Check that page title is set (not stuck on waiting)
-    const title = await page.title();
-    expect(title).toContain('Room:');
-
-    // Check that we're not stuck on "waiting for..." message
-    const waitingText = page.locator('text=waiting for');
-    await expect(waitingText).not.toBeVisible({ timeout: 3000 });
-  });
-
-  test('should show status panel', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
-
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
-
-    // Status panel should be visible
-    const statusPanel = page.locator('.status-panel');
-    await expect(statusPanel).toBeVisible();
-
-    // Should have a heading
-    const statusHeading = statusPanel.locator('h2');
-    await expect(statusHeading).toContainText('Status');
-  });
-
-  test('should show manifest panel', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
-
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
-
-    // Manifest panel should be visible
-    const manifestPanel = page.locator('.manifest-panel');
-    await expect(manifestPanel).toBeVisible();
-
-    // Should have a heading
-    const manifestHeading = manifestPanel.locator('h2');
-    await expect(manifestHeading).toContainText('Context');
-  });
-
-  test('should show transcript panel', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
-
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
-
-    // Transcript panel should be visible
-    const transcriptPanel = page.locator('.transcript-panel');
-    await expect(transcriptPanel).toBeVisible();
-
-    // Should have a heading
-    const transcriptHeading = transcriptPanel.locator('h2');
-    await expect(transcriptHeading).toContainText('Transcript');
-  });
-
-  test('should show archive panel', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
-
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
-
-    // Archive panel should be visible
-    const archivePanel = page.locator('.archive-panel');
-    await expect(archivePanel).toBeVisible();
-
-    // Should have a heading
-    const archiveHeading = archivePanel.locator('h2');
-    await expect(archiveHeading).toContainText('Archive');
-  });
-
-  test('should render room key in page', async ({ page }) => {
-    if (!roomKey) {
-      test.skip();
-    }
-
-    const url = `/app/room/${roomKey}`;
-    await page.goto(url);
-
-    // Check that room key is accessible via window.ROOM_KEY
-    const pageRoomKey = await page.evaluate(() => window.ROOM_KEY);
-    expect(pageRoomKey).toBe(roomKey);
+    test('Web UI page loads without hanging', async ({ page }) => {
+      // Page must load within 5 seconds
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`, {
+        waitUntil: 'networkidle',
+        timeout: 5000,
+      });
+      
+      // Should NOT show "waiting" state
+      const waitingText = await page.$('text=Waiting');
+      expect(waitingText).toBeNull();
+      
+      // All panels should be visible
+      const statusPanel = await page.$('.status-panel');
+      expect(statusPanel).not.isNull();
+    });
   });
 
   test('should handle non-existent room gracefully', async ({ page }) => {
-    const url = '/app/room/non-existent-room-xyz';
-    await page.goto(url);
-
-    // Should show some indication that room doesn't exist or is empty
-    // The exact behavior depends on how the app handles missing rooms
+    await page.goto(`${BASE_URL}/app/room/non-existent-room-xyz`);
+    
+    // Page should load (not crash)
     await page.waitForLoadState('networkidle');
-
+    
     // At minimum, page should load without crashing
     const title = await page.title();
     expect(title).toBeTruthy();

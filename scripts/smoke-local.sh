@@ -12,6 +12,7 @@ TEMP_PORT=9100
 TEMP_CONFIG="/tmp/pi-matrix-smoke-test-config.json"
 TEMP_STORAGE="/tmp/pi-matrix-smoke-storage"
 SESSION_DIR="/tmp/pi-matrix-smoke-sessions"
+WORKING_DIR="/tmp/pi-matrix-smoke-working"
 
 # Cleanup function
 cleanup() {
@@ -23,13 +24,14 @@ cleanup() {
     fi
     # Remove temp files
     rm -f "$TEMP_CONFIG"
-    rm -rf "$TEMP_STORAGE" "$SESSION_DIR"
+    rm -rf "$TEMP_STORAGE" "$SESSION_DIR" "$WORKING_DIR"
 }
 
 trap cleanup EXIT
 
 # Create temp config
 echo "Creating temp config..."
+mkdir -p "$WORKING_DIR"
 cat > "$TEMP_CONFIG" <<EOF
 {
   "homeserverUrl": "http://127.0.0.1:9999",
@@ -39,7 +41,7 @@ cat > "$TEMP_CONFIG" <<EOF
   "botUserId": "@smoke-test:localhost",
   "storageFile": "$TEMP_STORAGE/matrix.db",
   "sessionBaseDir": "$SESSION_DIR",
-  "workingDirectory": "/root/homelab"
+  "workingDirectory": "$WORKING_DIR"
 }
 EOF
 

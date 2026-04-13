@@ -2,12 +2,12 @@
  * Main room view that coordinates all panels.
  */
 
-import { getLiveRoom, getContextManifest, getLiveTranscript, getArchiveSessions, connectEvents } from './api.js';
-import { LiveStatusPanel } from './components/status-panel.js';
-import { ManifestPanel } from './components/manifest-panel.js';
-import { TranscriptPanel } from './components/transcript-panel.js';
-import { ArchivePanel } from './components/archive-panel.js';
-import type { LiveRoomResponse, ContextManifestResponse, TranscriptResponse, ArchiveSession } from './types.js';
+import { connectEvents, getArchiveSessions, getContextManifest, getLiveRoom, getLiveTranscript } from "./api.js";
+import { ArchivePanel } from "./components/archive-panel.js";
+import { ManifestPanel } from "./components/manifest-panel.js";
+import { LiveStatusPanel } from "./components/status-panel.js";
+import { TranscriptPanel } from "./components/transcript-panel.js";
+import type { ArchiveSession, ContextManifestResponse, LiveRoomResponse, TranscriptResponse } from "./types.js";
 
 export class RoomView {
   private roomKey: string;
@@ -53,7 +53,7 @@ export class RoomView {
       // Start polling for updates
       this.startPolling();
     } catch (error) {
-      console.error('Failed to load room data:', error);
+      console.error("Failed to load room data:", error);
     }
   }
 
@@ -65,26 +65,26 @@ export class RoomView {
         const data = JSON.parse(event.data);
         this.handleSSEEvent(data);
       } catch (e) {
-        console.warn('Failed to parse SSE event:', e);
+        console.warn("Failed to parse SSE event:", e);
       }
     };
   }
 
   private handleSSEEvent(event: any): void {
     switch (event.type) {
-      case 'text_delta':
-        this.transcriptPanel.appendTextDelta(event.data?.text || '');
+      case "text_delta":
+        this.transcriptPanel.appendTextDelta(event.data?.text || "");
         break;
-      case 'run_start':
+      case "run_start":
         this.liveStatusPanel.setProcessing(true);
         break;
-      case 'run_end':
+      case "run_end":
         this.liveStatusPanel.setProcessing(false);
         break;
-      case 'tool_start':
+      case "tool_start":
         // Could add tool event to transcript
         break;
-      case 'tool_end':
+      case "tool_end":
         // Could add tool event to transcript
         break;
     }
@@ -112,12 +112,12 @@ export class RoomView {
   }
 
   render(): HTMLElement {
-    const container = document.createElement('div');
-    container.className = 'room-view';
+    const container = document.createElement("div");
+    container.className = "room-view";
 
     // Header
-    const header = document.createElement('header');
-    header.className = 'room-header';
+    const header = document.createElement("header");
+    header.className = "room-header";
     header.innerHTML = `
       <h1>Room: ${this.escapeHtml(this.roomKey)}</h1>
       <a href="/room/${this.escapeHtml(this.roomKey)}" target="_blank">View EJS fallback</a>
@@ -125,19 +125,19 @@ export class RoomView {
     container.appendChild(header);
 
     // Main content
-    const main = document.createElement('main');
-    main.className = 'room-main';
+    const main = document.createElement("main");
+    main.className = "room-main";
 
     // Left column: Status and Manifest
-    const leftCol = document.createElement('section');
-    leftCol.className = 'room-left';
+    const leftCol = document.createElement("section");
+    leftCol.className = "room-left";
     leftCol.appendChild(this.liveStatusPanel.render());
     leftCol.appendChild(this.manifestPanel.render());
     main.appendChild(leftCol);
 
     // Right column: Transcript and Archive
-    const rightCol = document.createElement('section');
-    rightCol.className = 'room-right';
+    const rightCol = document.createElement("section");
+    rightCol.className = "room-right";
     rightCol.appendChild(this.transcriptPanel.render());
     rightCol.appendChild(this.archivePanel.render());
     main.appendChild(rightCol);
@@ -148,7 +148,7 @@ export class RoomView {
   }
 
   private escapeHtml(text: string): string {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
   }

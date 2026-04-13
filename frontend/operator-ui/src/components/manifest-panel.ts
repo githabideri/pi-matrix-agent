@@ -2,41 +2,41 @@
  * Context manifest panel component.
  */
 
-import type { ContextManifestResponse } from '../types.js';
+import type { ContextManifestResponse } from "../types.js";
 
 export class ManifestPanel {
   private container: HTMLElement;
   private contentEl: HTMLElement;
 
   constructor() {
-    this.container = document.createElement('section');
-    this.container.className = 'panel manifest-panel';
+    this.container = document.createElement("section");
+    this.container.className = "panel manifest-panel";
     this.container.innerHTML = `
       <h2>Context Manifest</h2>
       <div class="manifest-content"></div>
     `;
-    this.contentEl = this.container.querySelector('.manifest-content')!;
+    this.contentEl = this.container.querySelector(".manifest-content")!;
   }
 
   update(data: ContextManifestResponse | null): void {
     if (!data) {
-      this.contentEl.innerHTML = '<p>No context manifest available</p>';
+      this.contentEl.innerHTML = "<p>No context manifest available</p>";
       return;
     }
 
-    const toolsList = data.toolNames
-      .map((t) => `<li><code>${this.escapeHtml(t)}</code></li>`)
-      .join('');
+    const toolsList = data.toolNames.map((t) => `<li><code>${this.escapeHtml(t)}</code></li>`).join("");
 
     const sourcesList = data.contextSources
-      .map((s) => `
+      .map(
+        (s) => `
         <li>
           <code>${this.escapeHtml(s.type)}</code>: 
           ${this.escapeHtml(s.relativePath || s.path)}
-          ${s.description ? `<em> (${this.escapeHtml(s.description)})</em>` : ''}
+          ${s.description ? `<em> (${this.escapeHtml(s.description)})</em>` : ""}
         </li>
-      `)
-      .join('');
+      `,
+      )
+      .join("");
 
     this.contentEl.innerHTML = `
       <dl>
@@ -60,7 +60,7 @@ export class ManifestPanel {
   }
 
   private escapeHtml(text: string): string {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
   }

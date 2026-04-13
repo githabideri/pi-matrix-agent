@@ -1,6 +1,5 @@
-import { Router, Request, Response } from "express";
-import { PiSessionBackend } from "../pi-backend.js";
-import { buildContextManifest, manifestToResponse } from "../context-manifest.js";
+import { type Request, type Response, Router } from "express";
+import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildLiveTranscript } from "../transcript.js";
 
@@ -24,26 +23,50 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
   // GET /api/live/rooms/:roomKey - Get details for one live room
   router.get("/:roomKey", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
+    console.log(`[LIVE] Getting room details for ${roomKey}`);
     const roomState = piBackend.getSessionByKey(roomKey);
 
     if (!roomState) {
+      console.log(`[LIVE] Room ${roomKey} not found`);
       return res.status(404).json({ error: "Room not found" });
     }
 
+    console.log(`[LIVE] Room state found: isProcessing=${roomState.isProcessing}, snapshot=${!!roomState.snapshot}`);
+
     try {
-      const manifest = await buildContextManifest(roomState, workingDirectory);
-      const response = manifestToResponse(manifest);
-      // Add extra fields for room details
-      response.processingStartedAt = roomState.processingStartedAt?.toISOString();
+      console.log(`[LIVE] Building response object...`);
+      // Build response directly from room state, no async calls
+      const response: any = {
+        roomId: roomState.roomId,
+        roomKey: roomState.roomKey,
+        sessionId: roomState.sessionId,
+        relativeSessionPath: roomState.sessionFile
+          ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
+          : undefined,
+        isProcessing: roomState.isProcessing,
+        processingStartedAt: roomState.processingStartedAt?.toISOString(),
+      };
+
+      // Add snapshot data if available
+      if (roomState.snapshot) {
+        response.model = roomState.snapshot.model;
+        response.thinkingLevel = roomState.snapshot.thinkingLevel;
+        response.toolNames = roomState.snapshot.toolNames;
+        response.snapshotAt = roomState.snapshot.snapshotAt.toISOString();
+      }
+
+      console.log(`[LIVE] Response object built, sending JSON...`);
+      console.log(`[LIVE] Response:`, JSON.stringify(response, null, 2));
       res.json(response);
-    } catch (error) {
-      console.error(`Error getting room details for ${roomKey}:`, error);
+      console.log(`[LIVE] res.json() called`);
+    } catch (error: any) {
+      console.error(`[LIVE] Error getting room details for ${roomKey}:`, error);
       res.status(500).json({ error: "Failed to get room details" });
     }
   });
 
   // GET /api/live/rooms/:roomKey/context - Get context manifest
-  router.get("/:roomKey/context", async (req: Request, res: Response) => {
+  router.get("/:roomKey/context", (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const roomState = piBackend.getSessionByKey(roomKey);
 
@@ -51,13 +74,28 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
       return res.status(404).json({ error: "Room not found" });
     }
 
-    try {
-      const manifest = await buildContextManifest(roomState, workingDirectory);
-      res.json(manifestToResponse(manifest));
-    } catch (error) {
-      console.error(`Error building context manifest for ${roomKey}:`, error);
-      res.status(500).json({ error: "Failed to build context manifest" });
-    }
+    // Build response directly from snapshot (no async operations)
+    const response: any = {
+      roomId: roomState.roomId,
+      roomKey: roomState.roomKey,
+      sessionId: roomState.sessionId,
+      relativeSessionPath: roomState.sessionFile
+        ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
+        : undefined,
+      workingDirectory: workingDirectory,
+      model: roomState.snapshot?.model,
+      thinkingLevel: roomState.snapshot?.thinkingLevel,
+      isProcessing: roomState.isProcessing,
+      isStreaming: roomState.isProcessing ? true : undefined,
+      processingStartedAt: roomState.processingStartedAt?.toISOString(),
+      toolNames: roomState.snapshot?.toolNames || ["read", "bash", "edit", "write"],
+      resourceLoaderType: "DefaultResourceLoader",
+      contextSources: [], // Skip file reads - not critical for control plane
+      generatedAt: new Date().toISOString(),
+      snapshotAt: roomState.snapshot?.snapshotAt?.toISOString(),
+    };
+
+    res.json(response);
   });
 
   // GET /api/live/rooms/:roomKey/transcript - Get live session transcript
@@ -69,12 +107,25 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
       return res.status(404).json({ error: "Room not found" });
     }
 
+    // If processing, return minimal response immediately
+    if (roomState.isProcessing) {
+      return res.json({
+        roomId: roomState.roomId,
+        roomKey: roomKey,
+        sessionId: roomState.sessionId,
+        sessionFile: roomState.sessionFile,
+        relativeSessionPath: roomState.sessionFile
+          ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
+          : undefined,
+        items: [], // Empty while processing - file may be locked
+        isProcessing: true,
+      });
+    }
+
     try {
-      const transcript = await buildLiveTranscript(
-        roomState.sessionId || "",
-        roomState.sessionFile,
-        { baseDir: workingDirectory }
-      );
+      const transcript = await buildLiveTranscript(roomState.sessionId || "", roomState.sessionFile, {
+        baseDir: workingDirectory,
+      });
 
       // Add room context
       transcript.roomId = roomState.roomId;

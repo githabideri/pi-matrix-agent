@@ -1,6 +1,17 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
 /**
+ * Cached snapshot of room state for non-blocking API responses.
+ * Updated by event hooks, never touches session directly.
+ */
+export interface RoomSnapshot {
+  model?: string;
+  thinkingLevel?: string;
+  toolNames: string[];
+  snapshotAt: Date;
+}
+
+/**
  * Live room state tracks the active session and processing state for each Matrix room.
  */
 export interface LiveRoomState {
@@ -13,6 +24,7 @@ export interface LiveRoomState {
   processingStartedAt?: Date;
   lastEventAt?: Date;
   typingTimeout?: NodeJS.Timeout;
+  snapshot?: RoomSnapshot; // Cached snapshot for non-blocking responses
 }
 
 /**
@@ -40,7 +52,7 @@ export class RoomStateManager {
     let hash = 0;
     for (let i = 0; i < roomId.length; i++) {
       const char = roomId.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash;
     }
     return Math.abs(hash).toString(16);
@@ -63,6 +75,12 @@ export class RoomStateManager {
       sessionId: session.sessionId,
       sessionFile,
       isProcessing: false,
+      snapshot: {
+        model: undefined,
+        thinkingLevel: undefined,
+        toolNames: ["read", "bash", "edit", "write"], // Default tools
+        snapshotAt: new Date(),
+      },
     };
 
     this.live.set(roomId, state);
@@ -149,6 +167,29 @@ export class RoomStateManager {
   }
 
   /**
+   * Clear processing state for ALL rooms.
+   * Used for recovery on startup (when bot crashed while processing).
+   */
+  clearAllProcessing(): void {
+    let cleared = 0;
+    for (const state of this.live.values()) {
+      if (state.isProcessing) {
+        console.log(`[RoomStateManager] Clearing stuck processing state for room ${state.roomId}`);
+        state.isProcessing = false;
+        state.processingStartedAt = undefined;
+        if (state.typingTimeout) {
+          clearTimeout(state.typingTimeout);
+          state.typingTimeout = undefined;
+        }
+        cleared++;
+      }
+    }
+    if (cleared > 0) {
+      console.log(`[RoomStateManager] Cleared ${cleared} stuck processing state(s) on startup`);
+    }
+  }
+
+  /**
    * Dispose of a room's state.
    */
   dispose(roomId: string): void {
@@ -202,6 +243,17 @@ export class RoomStateManager {
     }
     return undefined;
   }
+
+  /**
+   * Update snapshot for a room (called from event hooks).
+   * This is safe to call even during processing since it doesn't block.
+   */
+  updateSnapshot(roomId: string, updates: Partial<RoomSnapshot>): void {
+    const state = this.live.get(roomId);
+    if (state?.snapshot) {
+      Object.assign(state.snapshot, updates, { snapshotAt: new Date() });
+    }
+  }
 }
 
 /**
@@ -225,10 +277,7 @@ export function extractSessionIdFromFilename(filename: string): string {
 /**
  * Parse session metadata from a JSONL file.
  */
-export async function parseSessionMetadata(
-  sessionFile: string,
-  baseDir: string
-): Promise<SessionMetadata> {
+export async function parseSessionMetadata(sessionFile: string, baseDir: string): Promise<SessionMetadata> {
   const fs = await import("fs/promises");
   const path = await import("path");
 

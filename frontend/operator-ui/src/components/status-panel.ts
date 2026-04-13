@@ -2,7 +2,7 @@
  * Live status panel component.
  */
 
-import type { LiveRoomResponse } from '../types.js';
+import type { LiveRoomResponse } from "../types.js";
 
 export class LiveStatusPanel {
   private container: HTMLElement;
@@ -10,8 +10,8 @@ export class LiveStatusPanel {
   private fieldsEl: HTMLElement;
 
   constructor() {
-    this.container = document.createElement('section');
-    this.container.className = 'panel status-panel';
+    this.container = document.createElement("section");
+    this.container.className = "panel status-panel";
     this.container.innerHTML = `
       <h2>Live Status</h2>
       <div class="status-indicator">
@@ -20,14 +20,14 @@ export class LiveStatusPanel {
       </div>
       <div class="status-fields"></div>
     `;
-    this.statusEl = this.container.querySelector('.status-indicator')!;
-    this.fieldsEl = this.container.querySelector('.status-fields')!;
+    this.statusEl = this.container.querySelector(".status-indicator")!;
+    this.fieldsEl = this.container.querySelector(".status-fields")!;
   }
 
   update(data: LiveRoomResponse | null): void {
     if (!data) {
-      this.statusEl.querySelector('.status-text')!.textContent = 'Not Live';
-      this.fieldsEl.innerHTML = '<p>No live session for this room</p>';
+      this.statusEl.querySelector(".status-text")!.textContent = "Not Live";
+      this.fieldsEl.innerHTML = "<p>No live session for this room</p>";
       return;
     }
 
@@ -35,15 +35,15 @@ export class LiveStatusPanel {
     const isStreaming = data.isStreaming;
 
     // Update status indicator
-    const statusDot = this.statusEl.querySelector('.status-dot')!;
-    const statusText = this.statusEl.querySelector('.status-text')!;
+    const statusDot = this.statusEl.querySelector(".status-dot")!;
+    const statusText = this.statusEl.querySelector(".status-text")!;
 
     if (isProcessing || isStreaming) {
-      statusDot.className = 'status-dot active';
-      statusText.textContent = isStreaming ? 'Streaming' : 'Processing';
+      statusDot.className = "status-dot active";
+      statusText.textContent = isStreaming ? "Streaming" : "Processing";
     } else {
-      statusDot.className = 'status-dot idle';
-      statusText.textContent = 'Idle';
+      statusDot.className = "status-dot idle";
+      statusText.textContent = "Idle";
     }
 
     // Update fields
@@ -53,49 +53,73 @@ export class LiveStatusPanel {
         <dd><code>${this.escapeHtml(data.roomId)}</code></dd>
         <dt>Room Key</dt>
         <dd><code>${this.escapeHtml(data.roomKey)}</code></dd>
-        ${data.sessionId ? `
+        ${
+          data.sessionId
+            ? `
         <dt>Session ID</dt>
         <dd><code>${this.escapeHtml(data.sessionId)}</code></dd>
-        ` : ''}
-        ${data.relativeSessionPath ? `
+        `
+            : ""
+        }
+        ${
+          data.relativeSessionPath
+            ? `
         <dt>Session File</dt>
         <dd><code>${this.escapeHtml(data.relativeSessionPath)}</code></dd>
-        ` : ''}
-        ${data.model ? `
+        `
+            : ""
+        }
+        ${
+          data.model
+            ? `
         <dt>Model</dt>
         <dd>${this.escapeHtml(data.model)}</dd>
-        ` : ''}
-        ${data.workingDirectory ? `
+        `
+            : ""
+        }
+        ${
+          data.workingDirectory
+            ? `
         <dt>Working Directory</dt>
         <dd><code>${this.escapeHtml(data.workingDirectory)}</code></dd>
-        ` : ''}
-        ${data.processingStartedAt ? `
+        `
+            : ""
+        }
+        ${
+          data.processingStartedAt
+            ? `
         <dt>Processing Started</dt>
         <dd>${new Date(data.processingStartedAt).toLocaleString()}</dd>
-        ` : ''}
-        ${data.lastEventAt ? `
+        `
+            : ""
+        }
+        ${
+          data.lastEventAt
+            ? `
         <dt>Last Event</dt>
         <dd>${new Date(data.lastEventAt).toLocaleString()}</dd>
-        ` : ''}
+        `
+            : ""
+        }
       </dl>
     `;
   }
 
   setProcessing(processing: boolean): void {
-    const statusDot = this.statusEl.querySelector('.status-dot')!;
-    const statusText = this.statusEl.querySelector('.status-text')!;
+    const statusDot = this.statusEl.querySelector(".status-dot")!;
+    const statusText = this.statusEl.querySelector(".status-text")!;
 
     if (processing) {
-      statusDot.className = 'status-dot active';
-      statusText.textContent = 'Processing';
+      statusDot.className = "status-dot active";
+      statusText.textContent = "Processing";
     } else {
-      statusDot.className = 'status-dot idle';
-      statusText.textContent = 'Idle';
+      statusDot.className = "status-dot idle";
+      statusText.textContent = "Idle";
     }
   }
 
   private escapeHtml(text: string): string {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
   }

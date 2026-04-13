@@ -39,12 +39,12 @@ export class SessionRegistry<T> {
   async drop(roomId: string): Promise<void> {
     // Remove from cache
     this.cache.delete(roomId);
-    
+
     // Also delete the session directory to clear persisted history
     const sessionDir = this.getSessionDir(roomId);
     try {
       await rm(sessionDir, { recursive: true, force: true });
-    } catch (err) {
+    } catch (_err) {
       // Ignore errors - directory might not exist
     }
   }

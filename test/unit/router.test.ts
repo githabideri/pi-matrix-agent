@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { routeMessage } from "../../src/router.js";
-import type { AgentBackend, ReplySink, IncomingMessage } from "../../src/types.js";
+import type { AgentBackend, IncomingMessage, ReplySink } from "../../src/types.js";
 
 describe("routeMessage", () => {
   it("does nothing for messages from non-allowlisted rooms", async () => {
@@ -8,20 +8,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!other:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "hello"
+      body: "hello",
     };
 
     await routeMessage(msg, {
@@ -29,8 +29,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies).toEqual([]);
@@ -41,20 +41,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@notallowed:example.org",
-      body: "hello"
+      body: "hello",
     };
 
     await routeMessage(msg, {
@@ -62,8 +62,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies).toEqual([]);
@@ -74,20 +74,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt(roomId, text) {
         return `OK:${roomId}:${text}`;
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "summarize this"
+      body: "summarize this",
     };
 
     await routeMessage(msg, {
@@ -95,8 +95,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies).toEqual(["OK:!room:example.org:summarize this"]);
@@ -107,20 +107,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!ping"
+      body: "!ping",
     };
 
     await routeMessage(msg, {
@@ -128,8 +128,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies).toEqual(["pong"]);
@@ -140,20 +140,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!status"
+      body: "!status",
     };
 
     await routeMessage(msg, {
@@ -161,8 +161,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies).toEqual(["Status: OK"]);
@@ -173,20 +173,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!help"
+      body: "!help",
     };
 
     await routeMessage(msg, {
@@ -194,8 +194,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies.length).toBe(1);
@@ -207,20 +207,20 @@ describe("routeMessage", () => {
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
-      }
+      },
     };
 
     const agent: AgentBackend = {
       async prompt() {
         throw new Error("SHOULD NOT BE CALLED");
-      }
+      },
     };
 
     const msg: IncomingMessage = {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!unknowncommand"
+      body: "!unknowncommand",
     };
 
     await routeMessage(msg, {
@@ -228,8 +228,8 @@ describe("routeMessage", () => {
         allowedRoomIds: ["!room:example.org"],
         allowedUserIds: ["@user:example.org"],
         agent,
-        sink
-      }
+        sink,
+      },
     });
 
     expect(replies.length).toBe(1);

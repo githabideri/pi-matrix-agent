@@ -1,6 +1,6 @@
 /**
  * Transcript parsing and normalization utilities.
- * 
+ *
  * Converts pi session JSONL files into a normalized transcript format
  * suitable for UI rendering.
  */
@@ -8,12 +8,7 @@
 /**
  * Normalized transcript item types.
  */
-export type TranscriptItemKind =
-  | "user_message"
-  | "assistant_message"
-  | "tool_start"
-  | "tool_end"
-  | "thinking";
+export type TranscriptItemKind = "user_message" | "assistant_message" | "tool_start" | "tool_end" | "thinking";
 
 /**
  * Base transcript item interface.
@@ -72,12 +67,7 @@ export interface ThinkingItem extends BaseTranscriptItem {
 /**
  * Union type for all transcript items.
  */
-export type TranscriptItem =
-  | UserMessageItem
-  | AssistantMessageItem
-  | ToolStartItem
-  | ToolEndItem
-  | ThinkingItem;
+export type TranscriptItem = UserMessageItem | AssistantMessageItem | ToolStartItem | ToolEndItem | ThinkingItem;
 
 /**
  * Full transcript response.
@@ -99,10 +89,10 @@ export async function parseSessionFile(
   options?: {
     includeThinking?: boolean;
     baseDir?: string;
-  }
+  },
 ): Promise<TranscriptResponse> {
   const fs = await import("fs/promises");
-  const path = await import("path");
+  const _path = await import("path");
 
   const includeThinking = options?.includeThinking ?? true;
   const baseDir = options?.baseDir;
@@ -158,12 +148,7 @@ export async function parseSessionFile(
 /**
  * Parse a message object into transcript items.
  */
-function parseMessage(
-  message: any,
-  messageId: string,
-  timestamp: string,
-  includeThinking: boolean
-): TranscriptItem[] {
+function parseMessage(message: any, messageId: string, timestamp: string, includeThinking: boolean): TranscriptItem[] {
   const items: TranscriptItem[] = [] as TranscriptItem[];
 
   if (!message.content) return items;
@@ -219,7 +204,7 @@ export async function buildLiveTranscript(
   options?: {
     baseDir?: string;
     includeThinking?: boolean;
-  }
+  },
 ): Promise<TranscriptResponse> {
   // If we have a session file, parse it
   if (sessionFile) {

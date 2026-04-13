@@ -2,7 +2,7 @@
  * Transcript panel component.
  */
 
-import type { AnyTranscriptItem } from '../types.js';
+import type { AnyTranscriptItem } from "../types.js";
 
 export class TranscriptPanel {
   private container: HTMLElement;
@@ -10,13 +10,13 @@ export class TranscriptPanel {
   private items: AnyTranscriptItem[] = [];
 
   constructor() {
-    this.container = document.createElement('section');
-    this.container.className = 'panel transcript-panel';
+    this.container = document.createElement("section");
+    this.container.className = "panel transcript-panel";
     this.container.innerHTML = `
       <h2>Transcript</h2>
       <div class="transcript"></div>
     `;
-    this.transcriptEl = this.container.querySelector('.transcript')!;
+    this.transcriptEl = this.container.querySelector(".transcript")!;
   }
 
   setInitialTranscript(items: AnyTranscriptItem[]): void {
@@ -26,7 +26,7 @@ export class TranscriptPanel {
 
   appendTextDelta(text: string): void {
     // Find the last assistant message and append to it
-    const lastAssistant = this.items.filter((i) => i.kind === 'assistant_message').pop();
+    const lastAssistant = this.items.filter((i) => i.kind === "assistant_message").pop();
     if (lastAssistant) {
       lastAssistant.text += text;
       this.renderTranscript();
@@ -36,10 +36,8 @@ export class TranscriptPanel {
 
   private renderTranscript(): void {
     const groups = this.groupByThread();
-    
-    this.transcriptEl.innerHTML = groups
-      .map((group) => this.renderThread(group))
-      .join('');
+
+    this.transcriptEl.innerHTML = groups.map((group) => this.renderThread(group)).join("");
   }
 
   private groupByThread(): Array<{ user: AnyTranscriptItem; assistant: AnyTranscriptItem[] }> {
@@ -47,7 +45,7 @@ export class TranscriptPanel {
     let currentGroup: { user: AnyTranscriptItem; assistant: AnyTranscriptItem[] } | null = null;
 
     for (const item of this.items) {
-      if (item.kind === 'user_message') {
+      if (item.kind === "user_message") {
         if (currentGroup) {
           groups.push(currentGroup);
         }
@@ -79,7 +77,7 @@ export class TranscriptPanel {
     const assistantHtml = group.assistant
       .map((item) => {
         switch (item.kind) {
-          case 'assistant_message':
+          case "assistant_message":
             return `
               <div class="message assistant-message">
                 <div class="message-header">
@@ -89,7 +87,7 @@ export class TranscriptPanel {
                 <div class="message-content">${this.escapeHtml(item.text)}</div>
               </div>
             `;
-          case 'thinking':
+          case "thinking":
             return `
               <div class="message thinking-message">
                 <div class="message-header">
@@ -98,7 +96,7 @@ export class TranscriptPanel {
                 <div class="message-content">${this.escapeHtml(item.text)}</div>
               </div>
             `;
-          case 'tool_start':
+          case "tool_start":
             return `
               <div class="message tool-message">
                 <div class="message-content">
@@ -106,33 +104,33 @@ export class TranscriptPanel {
                 </div>
               </div>
             `;
-          case 'tool_end':
+          case "tool_end":
             return `
               <div class="message tool-message">
                 <div class="message-content">
-                  <code>✅ Tool ${this.escapeHtml(item.toolName)}: ${item.success ? 'success' : 'failed'}</code>
+                  <code>✅ Tool ${this.escapeHtml(item.toolName)}: ${item.success ? "success" : "failed"}</code>
                 </div>
               </div>
             `;
           default:
-            return '';
+            return "";
         }
       })
-      .join('');
+      .join("");
 
-    return userHtml + assistantHtml + '</div>';
+    return `${userHtml + assistantHtml}</div>`;
   }
 
   private formatTime(timestamp: string): string {
     try {
       return new Date(timestamp).toLocaleTimeString();
     } catch {
-      return '';
+      return "";
     }
   }
 
   private escapeHtml(text: string): string {
-    const div = document.createElement('div');
+    const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
   }

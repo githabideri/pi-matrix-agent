@@ -1,6 +1,10 @@
 # Build output
 dist/
 
+# Environment files (secrets)
+.env*
+!/.env.example
+
 # Dependencies
 node_modules/
 
@@ -14,6 +18,8 @@ test-storage/
 test/**/*.js
 test/**/*.d.ts
 test/**/*.js.map
+test-results/
+tests/integration/
 
 # OS files
 .DS_Store

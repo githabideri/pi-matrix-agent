@@ -1,6 +1,6 @@
-import type { IncomingMessage, AgentBackend, ReplySink, RouterConfig } from "./types.js";
 import { parseCommand } from "./command.js";
 import { isAllowedRoom, isAllowedUser } from "./policy.js";
+import type { IncomingMessage, RouterConfig } from "./types.js";
 
 // Interface for session reset capability
 export interface SessionResetter {
@@ -16,10 +16,7 @@ export interface RouterOptions {
   stopTypingLoop?: (interval: NodeJS.Timeout) => void;
 }
 
-export async function routeMessage(
-  msg: IncomingMessage,
-  options: RouterOptions
-): Promise<void> {
+export async function routeMessage(msg: IncomingMessage, options: RouterOptions): Promise<void> {
   const config = options.config;
 
   // Check if room is allowed
@@ -55,7 +52,7 @@ export async function routeMessage(
           "  !reset   - Clear conversation memory\n" +
           "  !control - Get control URL for this room\n" +
           "  !help    - Show this help\n" +
-          "\nPlain text messages are sent to pi for inference."
+          "\nPlain text messages are sent to pi for inference.",
       );
       return;
 
@@ -83,7 +80,7 @@ export async function routeMessage(
       if (options.controlUrl) {
         // Get room key for URL
         const roomState = (options.sessionRegistry as any)?.getLiveRoomInfo?.(msg.roomId);
-        if (roomState && roomState.roomKey) {
+        if (roomState?.roomKey) {
           const controlUrl = `${options.controlUrl}/room/${roomState.roomKey}`;
           await config.sink.reply(msg.roomId, msg.eventId, `Control view: ${controlUrl}`);
         } else {
@@ -94,7 +91,7 @@ export async function routeMessage(
       }
       return;
 
-    case "chat_prompt":
+    case "chat_prompt": {
       // Start typing indicator
       let typingInterval: NodeJS.Timeout | undefined;
       if (options.startTypingLoop) {
@@ -114,5 +111,6 @@ export async function routeMessage(
         }
       }
       return;
+    }
   }
 }

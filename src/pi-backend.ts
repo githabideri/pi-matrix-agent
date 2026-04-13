@@ -1,6 +1,6 @@
-import { createAgentSession, SessionManager, AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import { RoomStateManager, type LiveRoomState } from "./room-state.js";
+import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
+import { type LiveRoomState, RoomStateManager } from "./room-state.js";
 
 export interface PiSessionBackendOptions {
   sessionBaseDir: string;
@@ -16,6 +16,11 @@ export class PiSessionBackend {
     this.sessionBaseDir = options.sessionBaseDir;
     this.cwd = options.cwd ?? process.cwd();
     this.roomStateManager = new RoomStateManager();
+
+    // Recovery: Clear any stuck processing states on startup
+    // This handles the case where the bot crashed while processing
+    console.log(`[PiSessionBackend] Clearing any stuck processing states on startup...`);
+    this.roomStateManager.clearAllProcessing();
   }
 
   private hashRoomId(roomId: string): string {
@@ -23,7 +28,7 @@ export class PiSessionBackend {
     let hash = 0;
     for (let i = 0; i < roomId.length; i++) {
       const char = roomId.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32bit integer
     }
     return Math.abs(hash).toString(16);
@@ -37,7 +42,7 @@ export class PiSessionBackend {
 
   async getOrCreateSession(roomId: string): Promise<AgentSession> {
     console.log(`[PiSessionBackend] getOrCreateSession() for room ${roomId}`);
-    
+
     // Check if session already exists in cache
     const existingState = this.roomStateManager.get(roomId);
     if (existingState) {
@@ -50,10 +55,7 @@ export class PiSessionBackend {
 
     // Create session manager for this room's session directory
     // Use continueRecent to resume existing session or create new one
-    const sessionManager = SessionManager.continueRecent(
-      this.cwd,
-      roomSessionDir
-    );
+    const sessionManager = SessionManager.continueRecent(this.cwd, roomSessionDir);
 
     // Set up auth storage and model registry
     const authStorage = AuthStorage.create();
@@ -74,9 +76,58 @@ export class PiSessionBackend {
     console.log(`[PiSessionBackend] Created session for room ${roomId} in ${roomSessionDir}: ${session.sessionFile}`);
 
     // Store in room state manager
-    this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
+    const roomState = this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
+
+    // Set up event hooks to update snapshot (non-blocking)
+    this.setupEventHooks(roomId, session);
+
+    // Update snapshot with model info (safe, non-blocking)
+    this.updateSnapshotFromSession(roomState, session);
 
     return session;
+  }
+
+  /**
+   * Set up event hooks for a session to update snapshot.
+   * These hooks update cached state without blocking API responses.
+   */
+  private setupEventHooks(roomId: string, session: AgentSession): void {
+    session.subscribe((event) => {
+      const roomState = this.roomStateManager.get(roomId);
+      if (!roomState) return;
+
+      // Update snapshot when inference completes
+      if (event.type === "agent_end" || event.type === "turn_end") {
+        this.updateSnapshotFromSession(roomState, session);
+      }
+    });
+  }
+
+  /**
+   * Update snapshot from session state.
+   * Only reads non-blocking properties.
+   */
+  private updateSnapshotFromSession(roomState: LiveRoomState, session: AgentSession): void {
+    try {
+      // Extract model info safely
+      let model: string | undefined;
+      let thinkingLevel: string | undefined;
+
+      if (session.model) {
+        model = session.model.id || session.model.name || "unknown";
+      }
+      if (session.thinkingLevel) {
+        thinkingLevel = session.thinkingLevel;
+      }
+
+      // Update snapshot
+      this.roomStateManager.updateSnapshot(roomState.roomId, {
+        model,
+        thinkingLevel,
+      });
+    } catch {
+      // Silently ignore - snapshot will use stale/default values
+    }
   }
 
   /**
@@ -105,7 +156,7 @@ export class PiSessionBackend {
 
   async prompt(roomId: string, text: string): Promise<string> {
     console.log(`[PiSessionBackend] prompt() called for room ${roomId}, text: "${text.slice(0, 50)}..."`);
-    
+
     // Single-flight guard: reject if already processing
     const guardError = this.checkProcessingGuard(roomId);
     if (guardError) {
@@ -116,6 +167,11 @@ export class PiSessionBackend {
     const session = await this.getOrCreateSession(roomId);
     console.log(`[PiSessionBackend] Got session ${session.sessionId} for room ${roomId}`);
     this.roomStateManager.setProcessing(roomId, true);
+
+    // Timeout protection: 5 minutes
+    // This is a SAFETY NET for when inference hangs, not for slow responses
+    const timeoutMs = 5 * 60 * 1000; // 5 minutes
+    let timeoutId: NodeJS.Timeout | null = null;
 
     try {
       // Collect the response text
@@ -130,8 +186,24 @@ export class PiSessionBackend {
         }
       });
 
-      // Send the prompt and wait for completion
-      await session.prompt(text);
+      // Send the prompt with timeout protection
+      const promptPromise = session.prompt(text);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          console.error(`[PiSessionBackend] TIMEOUT: Prompt for room ${roomId} exceeded ${timeoutMs / 60000} minutes`);
+          reject(
+            new Error(`Prompt timeout after ${timeoutMs / 60000} minutes. The inference backend may be unresponsive.`),
+          );
+        }, timeoutMs);
+      });
+
+      await Promise.race([promptPromise, timeoutPromise]);
+
+      // Clear timeout if it hasn't fired
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
 
       // Update session file path (may have been created/updated)
       this.roomStateManager.updateSessionFile(roomId, session.sessionFile);
@@ -139,9 +211,20 @@ export class PiSessionBackend {
       // Clean up subscription
       unsubscribe();
 
+      console.log(`[PiSessionBackend] Prompt completed for room ${roomId}, response length: ${responseText.length}`);
       return responseText;
+    } catch (error) {
+      console.error(`[PiSessionBackend] Error during prompt for room ${roomId}:`, error);
+      // Re-throw so router can handle the error
+      throw error;
     } finally {
+      // Clear timeout if still pending
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      // ALWAYS clear processing state - this is critical for recovery
       this.roomStateManager.clearProcessing(roomId);
+      console.log(`[PiSessionBackend] Cleared processing state for room ${roomId}`);
     }
   }
 
@@ -160,7 +243,7 @@ export class PiSessionBackend {
       // Step 2: If there's an old session, clean it up properly
       if (oldState) {
         console.log(`[PiSessionBackend] Found old session ${oldState.sessionId}, cleaning up...`);
-        
+
         // Clear typing timeout
         if (oldState.typingTimeout) {
           clearTimeout(oldState.typingTimeout);
@@ -272,11 +355,11 @@ export class PiSessionBackend {
     // Scan sessionBaseDir for all session files (including archived ones)
     try {
       const entries = await fs.readdir(this.sessionBaseDir, { recursive: false });
-      
+
       for (const entry of entries) {
         const entryPath = `${this.sessionBaseDir}/${entry}`;
         const stat = await fs.stat(entryPath);
-        
+
         if (stat.isDirectory() && entry.startsWith("room-")) {
           // This is a room session directory - list its contents
           const roomEntries = await fs.readdir(entryPath);
@@ -313,7 +396,7 @@ export class PiSessionBackend {
 
   async getArchivedSessions(): Promise<Array<{ path: string; id: string; firstMessage: string }>> {
     const fs = await import("fs/promises");
-    
+
     // Get active session paths for comparison
     const activePaths = new Set<string>();
     for (const state of this.roomStateManager.listLive()) {
@@ -327,11 +410,11 @@ export class PiSessionBackend {
     // Scan sessionBaseDir for all session files
     try {
       const entries = await fs.readdir(this.sessionBaseDir, { recursive: false });
-      
+
       for (const entry of entries) {
         const entryPath = `${this.sessionBaseDir}/${entry}`;
         const stat = await fs.stat(entryPath);
-        
+
         if (stat.isDirectory() && entry.startsWith("room-")) {
           // This is a room session directory - list its contents
           const roomEntries = await fs.readdir(entryPath);
@@ -344,20 +427,20 @@ export class PiSessionBackend {
                 const lines = content.trim().split("\n");
                 let firstMessage = "";
                 let sessionId = sessionPath.split("/").pop() || "";
-                
+
                 for (const line of lines) {
                   try {
                     const entry = JSON.parse(line);
                     if (entry.id) sessionId = entry.id;
                     if (entry.content && entry.role === "user" && !firstMessage) {
-                      firstMessage = Array.isArray(entry.content) 
-                        ? entry.content.map((c: any) => c.text || c).join(" ") 
+                      firstMessage = Array.isArray(entry.content)
+                        ? entry.content.map((c: any) => c.text || c).join(" ")
                         : entry.content;
                       break;
                     }
                   } catch {}
                 }
-                
+
                 archived.push({
                   path: sessionPath,
                   id: sessionId,
@@ -382,7 +465,7 @@ export class PiSessionBackend {
   async getArchivedSessionsForRoom(roomId: string): Promise<Array<{ path: string; id: string; firstMessage: string }>> {
     const roomSessionDir = this.getRoomSessionDir(roomId);
     const fs = await import("fs/promises");
-    
+
     // Get the current live session file for this room
     const liveState = this.roomStateManager.get(roomId);
     const liveSessionFile = liveState?.sessionFile;
@@ -392,35 +475,35 @@ export class PiSessionBackend {
     // List all session files in the room directory
     try {
       const entries = await fs.readdir(roomSessionDir);
-      
+
       for (const entry of entries) {
         if (entry.endsWith(".jsonl")) {
           const sessionPath = `${roomSessionDir}/${entry}`;
-          
+
           // Skip if this is the current live session
           if (sessionPath === liveSessionFile) {
             continue;
           }
-          
+
           // Parse session info from file
           const content = await fs.readFile(sessionPath, "utf-8");
           const lines = content.trim().split("\n");
           let firstMessage = "";
           let sessionId = entry.split("_")[1] || entry;
-          
+
           for (const line of lines) {
             try {
               const parsed = JSON.parse(line);
               if (parsed.id) sessionId = parsed.id;
               if (parsed.content && parsed.role === "user" && !firstMessage) {
-                firstMessage = Array.isArray(parsed.content) 
-                  ? parsed.content.map((c: any) => c.text || c).join(" ") 
+                firstMessage = Array.isArray(parsed.content)
+                  ? parsed.content.map((c: any) => c.text || c).join(" ")
                   : parsed.content;
                 break;
               }
             } catch {}
           }
-          
+
           archived.push({
             path: sessionPath,
             id: sessionId,
@@ -428,7 +511,7 @@ export class PiSessionBackend {
           });
         }
       }
-    } catch (error) {
+    } catch (_error) {
       // Directory might not exist yet
       console.log(`[PiSessionBackend] No archived sessions for room ${roomId}`);
     }

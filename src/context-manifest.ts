@@ -42,6 +42,7 @@ export interface ContextManifest {
 
   // Metadata
   generatedAt: Date;
+  snapshotAt?: Date; // When snapshot was last updated
 }
 
 /**
@@ -49,49 +50,23 @@ export interface ContextManifest {
  */
 export async function buildContextManifest(
   roomState: LiveRoomState,
-  workingDirectory: string
+  workingDirectory: string,
 ): Promise<ContextManifest> {
-  const session = roomState.session;
+  console.log(`[CONTEXT] buildContextManifest called for ${roomState.roomKey}, isProcessing=${roomState.isProcessing}`);
+  console.log(`[CONTEXT] snapshot exists: ${!!roomState.snapshot}`);
 
-  // Extract tool names from the agent
-  const toolNames: string[] = [];
-  try {
-    // Access agent's tools if available
-    const agent = session.agent;
-    // Tools may be stored differently depending on SDK version
-    // Try common patterns
-    if (agent && typeof agent === "object") {
-      // Try to access tools property
-      const anyAgent = agent as any;
-      if (anyAgent.tools && Array.isArray(anyAgent.tools)) {
-        toolNames.push(...anyAgent.tools.map((t: any) => t.name || t.id || "unknown"));
-      } else if (anyAgent._tools && Array.isArray(anyAgent._tools)) {
-        toolNames.push(...anyAgent._tools.map((t: any) => t.name || t.id || "unknown"));
-      }
-    }
-  } catch {
-    // Tools unavailable, leave empty
-  }
+  // Use cached snapshot for non-blocking response
+  // Snapshot is updated by event hooks, never touches session during request
+  const snapshot = roomState.snapshot;
 
-  // If no tools found via agent, use defaults based on SDK behavior
-  if (toolNames.length === 0) {
-    // Default tools from pi-coding-agent SDK
-    toolNames.push("read", "bash", "edit", "write");
-  }
+  const model = snapshot?.model;
+  const thinkingLevel = snapshot?.thinkingLevel;
+  const toolNames = snapshot?.toolNames || ["read", "bash", "edit", "write"];
 
-  // Get model info
-  let model: string | undefined;
-  let thinkingLevel: string | undefined;
-  try {
-    if (session.model) {
-      model = session.model.id || session.model.name || "unknown";
-    }
-    if (session.thinkingLevel) {
-      thinkingLevel = session.thinkingLevel;
-    }
-  } catch {
-    // Model info unavailable
-  }
+  // isStreaming is derived from processing state, not session
+  const isStreaming = roomState.isProcessing ? true : undefined;
+
+  console.log(`[CONTEXT] snapshot data: model=${model}, tools=${toolNames.join(",")}`);
 
   // Build context sources
   const contextSources: ContextSource[] = [];
@@ -167,12 +142,13 @@ export async function buildContextManifest(
     model,
     thinkingLevel,
     isProcessing: roomState.isProcessing,
-    isStreaming: session.isStreaming,
+    isStreaming,
     processingStartedAt: roomState.processingStartedAt,
     toolNames,
     resourceLoaderType: "DefaultResourceLoader", // SDK default
     contextSources,
     generatedAt: new Date(),
+    snapshotAt: snapshot?.snapshotAt, // When snapshot was last updated
   };
 }
 
@@ -194,6 +170,7 @@ export interface ContextManifestResponse {
   resourceLoaderType: string | "unavailable";
   contextSources: ContextSource[];
   generatedAt: string;
+  snapshotAt?: string; // When snapshot was last updated
 }
 
 /**
@@ -215,5 +192,6 @@ export function manifestToResponse(manifest: ContextManifest): ContextManifestRe
     resourceLoaderType: manifest.resourceLoaderType,
     contextSources: manifest.contextSources,
     generatedAt: manifest.generatedAt.toISOString(),
+    snapshotAt: manifest.snapshotAt?.toISOString(),
   };
 }

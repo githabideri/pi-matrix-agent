@@ -1,28 +1,39 @@
-import { Router, Request, Response } from "express";
-import { PiSessionBackend } from "../pi-backend.js";
-import { parseSessionMetadata, extractSessionIdFromFilename, RoomStateManager } from "../room-state.js";
+import { type Request, type Response, Router } from "express";
+import type { PiSessionBackend } from "../pi-backend.js";
+import { extractSessionIdFromFilename, parseSessionMetadata, RoomStateManager } from "../room-state.js";
 import { parseSessionFile } from "../transcript.js";
 
 export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string) {
   const router = Router();
 
+  // Debug endpoint
+  router.get("/debug", (_req: Request, res: Response) => {
+    console.log("[ARCHIVE] Debug endpoint hit!");
+    res.json({ ok: true, sessionBaseDir });
+  });
+
   // GET /api/archive/rooms/:roomKey/sessions - List archived sessions for a room
   router.get("/:roomKey/sessions", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
-    
+    console.log(`[ARCHIVE] Listing sessions for roomKey: ${roomKey}`);
+
     // First try to find the room in live rooms
     const roomId = piBackend.getRoomIdByKey(roomKey);
-    
+    console.log(`[ARCHIVE] roomId from live rooms: ${roomId}`);
+
     try {
       let archived: any[] = [];
-      
+
       if (roomId) {
         // Room is live, use existing method
+        console.log(`[ARCHIVE] Room is live, calling getArchivedSessionsForRoom`);
         archived = await piBackend.getArchivedSessionsForRoom(roomId);
       } else {
         // Room might be archived - search in the room directory directly
+        console.log(`[ARCHIVE] Room not live, searching directory directly`);
         archived = await findArchivedSessionsInRoomDir(roomKey, sessionBaseDir);
       }
+      console.log(`[ARCHIVE] Found ${archived.length} archived sessions`);
 
       // Format response
       const result = archived.map((session) => ({
@@ -93,6 +104,12 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
     }
   });
 
+  // Catch-all for debugging
+  router.use("/", (req: Request, res: Response) => {
+    console.log(`[ARCHIVE] Catch-all hit: ${req.method} ${req.path}`);
+    res.status(404).json({ error: "Not found in archive router", path: req.path });
+  });
+
   return router;
 }
 
@@ -110,7 +127,7 @@ function getRelativePath(sessionFile: string, baseDir: string): string {
 async function findSessionFileInRoomDir(
   roomKey: string,
   sessionId: string,
-  sessionBaseDir: string
+  sessionBaseDir: string,
 ): Promise<string | null> {
   const fs = await import("fs/promises");
   const path = await import("path");
@@ -119,7 +136,7 @@ async function findSessionFileInRoomDir(
 
   try {
     const entries = await fs.readdir(roomSessionDir);
-    
+
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) {
         const fileId = extractSessionIdFromFilename(entry);
@@ -139,10 +156,10 @@ async function findSessionFileInRoomDir(
  * Find session file by session ID within a room's directory (given roomId).
  * Kept for backwards compatibility with live room lookups.
  */
-async function findSessionFileBySessionId(
+async function _findSessionFileBySessionId(
   roomId: string,
   sessionId: string,
-  sessionBaseDir: string
+  sessionBaseDir: string,
 ): Promise<string | null> {
   const roomKey = RoomStateManager.hashRoomId(roomId);
   return findSessionFileInRoomDir(roomKey, sessionId, sessionBaseDir);
@@ -151,10 +168,7 @@ async function findSessionFileBySessionId(
 /**
  * Find archived sessions in a room directory.
  */
-async function findArchivedSessionsInRoomDir(
-  roomKey: string,
-  sessionBaseDir: string
-): Promise<any[]> {
+async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: string): Promise<any[]> {
   const fs = await import("fs/promises");
   const path = await import("path");
 
@@ -163,7 +177,7 @@ async function findArchivedSessionsInRoomDir(
 
   try {
     const entries = await fs.readdir(roomSessionDir);
-    
+
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) {
         const sessionFile = path.join(roomSessionDir, entry);
@@ -185,5 +199,3 @@ async function findArchivedSessionsInRoomDir(
 
   return results;
 }
-
-

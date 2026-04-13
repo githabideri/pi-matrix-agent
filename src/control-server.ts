@@ -70,11 +70,7 @@ export class ControlServer {
     // Preview frontend routes (/app/room/:roomKey)
     console.log("[ControlServer] Mounting preview frontend at /app/room");
 
-    // Serve built frontend assets
-    const frontendDistPath = path.join(__dirname, "../frontend/operator-ui/dist");
-    this.app.use("/app", express.static(frontendDistPath));
-
-    // Preview room page
+    // Preview room page - MUST come BEFORE static middleware
     this.app.get("/app/room/:roomKey", async (req: Request, res: Response) => {
       const roomKey = req.params.roomKey;
 
@@ -100,6 +96,10 @@ export class ControlServer {
         res.status(500).send("Error loading preview page");
       }
     });
+
+    // Serve built frontend assets - comes AFTER room route
+    const frontendDistPath = path.join(__dirname, "../frontend/operator-ui/dist");
+    this.app.use("/app", express.static(frontendDistPath));
   }
 
   async start(): Promise<void> {

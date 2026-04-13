@@ -19,15 +19,13 @@ export class SimpleInferenceBackend implements AgentBackend {
   }
 
   async prompt(_roomId: string, text: string): Promise<string> {
-    const messages: ChatMessage[] = [
-      { role: "user", content: text }
-    ];
+    const messages: ChatMessage[] = [{ role: "user", content: text }];
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
         model: this.model,
@@ -43,12 +41,12 @@ export class SimpleInferenceBackend implements AgentBackend {
     }
 
     const data = await response.json();
-    
+
     // Handle both streaming and non-streaming responses
     if (data.choices && data.choices.length > 0) {
       return data.choices[0].message.content || "";
     }
-    
+
     return "No response from model.";
   }
 }

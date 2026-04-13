@@ -18,7 +18,8 @@
     "smoke:local": "bash ./scripts/smoke-local.sh",
     "smoke:control": "bash ./scripts/smoke-control.sh",
     "smoke:matrix": "bash ./scripts/smoke-matrix.sh",
-    "smoke:ui": "playwright test tests/ui",
+    "smoke:ui": "bash ./scripts/ensure-ui-test-room.sh && playwright test tests/ui",
+    "smoke:full-loop": "playwright test tests/integration/full-loop",
     "check:single-process": "bash ./scripts/check-single-process.sh",
     "prepare": "husky"
   },
@@ -32,6 +33,7 @@
     "@biomejs/biome": "^2.4.11",
     "@playwright/test": "^1.59.1",
     "@types/node": "^20.10.0",
+    "axios": "^1.15.0",
     "husky": "^9.1.7",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",

@@ -15,6 +15,9 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/ui',
 
+  /* Global setup - ensures test room exists */
+  globalSetup: './tests/ui/global-setup.ts',
+
   /* Timeout settings */
   timeout: 30_000,
   expect: {
