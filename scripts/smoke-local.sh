@@ -41,12 +41,13 @@ cat > "$TEMP_CONFIG" <<EOF
   "botUserId": "@smoke-test:localhost",
   "storageFile": "$TEMP_STORAGE/matrix.db",
   "sessionBaseDir": "$SESSION_DIR",
-  "workingDirectory": "$WORKING_DIR"
+  "workingDirectory": "$WORKING_DIR",
+  "agentDir": "$TEMP_STORAGE/agent"
 }
 EOF
 
 # Create temp directories
-mkdir -p "$TEMP_STORAGE" "$SESSION_DIR"
+mkdir -p "$TEMP_STORAGE/agent" "$SESSION_DIR"
 
 # Start app on temp port (control-only mode, no Matrix)
 echo "Starting app on port $TEMP_PORT..."

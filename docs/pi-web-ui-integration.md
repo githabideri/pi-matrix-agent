@@ -27,15 +27,14 @@ This document describes the Phase 1 groundwork for integrating a Pi-style server
 
 ### Event Types
 
-| Event | Description | Maps from legacy |
-|-------|-------------|------------------|
-| `session_connected` | SSE connection established | - |
-| `turn_start` | User prompt received | `run_start` |
-| `message_update` | Text/thinking content delta | `text_delta` |
-| `tool_start` | Tool execution begins | - |
-| `tool_end` | Tool execution completes | - |
-| `turn_end` | Response complete | `run_end` |
-| `state_change` | Processing state changes | - |
+| Event | Description | Maps from Pi agent event |
+|-------|-------------|--------------------------|
+| `session_connected` | SSE connection established | (emitted by emitter) |
+| `turn_start` | User prompt received | `turn_start` |
+| `message_update` | Text/thinking content delta | `message_update` |
+| `tool_start` | Tool execution begins | `tool_execution_start` |
+| `tool_end` | Tool execution completes | `tool_execution_end` |
+| `turn_end` | Response complete | `turn_end` |
 
 ### Event Shapes
 
@@ -116,12 +115,15 @@ User connects to SSE
   └─> session_connected
 
 User submits prompt via POST /prompt
-  └─> turn_start
-  └─> message_update (text_delta)
-  └─> tool_start (bash)
-  └─> tool_end (bash, success)
-  └─> message_update (text_delta)
-  └─> turn_end
+  (POST returns immediately with {accepted: true, ...})
+
+SSE stream (client correlates via timing):
+  └─> turn_start (with turnId)
+  └─> message_update (content.type = "text_delta", delta = "...")
+  └─> tool_start (toolName = "bash", toolCallId)
+  └─> tool_end (toolName = "bash", success = true)
+  └─> message_update (content.type = "text_delta", delta = "...")
+  └─> turn_end (with same turnId)
 
 User disconnects
 ```
@@ -147,10 +149,11 @@ Content-Type: application/json
   "roomKey": "abc123",
   "roomId": "!room:example.com",
   "sessionId": "session-uuid",
-  "turnId": "turn-uuid",
   "timestamp": "2024-01-01T00:00:00.000Z"
 }
 ```
+
+**Note:** `turnId` is NOT in the response. The SSE stream provides the authoritative `turnId` via the `turn_start` event.
 
 ### Design Notes
 
@@ -158,6 +161,7 @@ Content-Type: application/json
 - **Fire-and-forget**: Actual response comes through SSE events
 - **Validates room**: Returns 404 for unknown room keys
 - **Validates input**: Returns 400 for missing/invalid `text` field
+- **No turnId**: Turn ID is provided by SSE via `turn_start` event, not by POST response
 
 ### Usage Pattern
 
@@ -181,47 +185,19 @@ fetch('/api/live/rooms/abc123/prompt', {
 
 ## Transcript API Contract
 
-### Endpoint
+**No changes made to transcript API in Phase 1.** The existing transcript endpoint and response format remain unchanged.
+
+### Existing Endpoint
 
 ```
 GET /api/live/rooms/:roomKey/transcript
 ```
 
-### Response
+### Existing Response Format
 
-```json
-{
-  "roomId": "!room:example.com",
-  "roomKey": "abc123",
-  "sessionId": "session-uuid",
-  "sessionFile": "/path/to/session.jsonl",
-  "relativeSessionPath": "room-abc123/session.jsonl",
-  "items": [
-    {
-      "kind": "user_message",
-      "id": "msg-uuid",
-      "text": "hello",
-      "timestamp": "2024-01-01T00:00:00.000Z"
-    },
-    {
-      "kind": "assistant_message",
-      "id": "msg-uuid",
-      "text": "hi there!",
-      "timestamp": "2024-01-01T00:00:00.000Z"
-    }
-  ]
-}
-```
+See `src/transcript.ts` for the current `TranscriptResponse` interface. The format is already suitable for the operator UI and does not require changes for Phase 1.
 
-### Item Kinds
-
-| Kind | Description |
-|------|-------------|
-| `user_message` | User prompt |
-| `assistant_message` | Assistant response |
-| `thinking` | Reasoning/thinking content |
-| `tool_start` | Tool invocation |
-| `tool_end` | Tool result |
+**Phase 2 may refine the transcript API if needed for the rich chat UI.**
 
 ## Implementation Files
 
@@ -305,10 +281,12 @@ GET /api/live/rooms/:roomKey/events
 
 Phase 1 delivers:
 
-- ✅ Normalized SSE event schema
-- ✅ Prompt submission endpoint (non-blocking)
-- ✅ Updated transcript API
-- ✅ Backward compatibility
+- ✅ Normalized SSE event schema (7 event types)
+- ✅ Prompt submission endpoint (non-blocking, no turnId in response)
+- ✅ SSE event emitter with proper Pi agent event mapping
+- ✅ Backward compatibility (legacy event names still recognized)
 - ✅ Design documentation
+
+**Note:** Transcript API was intentionally left unchanged - existing format is already suitable.
 
 Phase 2 will build the actual rich UI on top of this contract.

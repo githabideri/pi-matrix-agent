@@ -16,13 +16,13 @@ const API_BASE = "/api";
 
 /**
  * Prompt submission response
+ * Note: turnId is NOT included - SSE provides authoritative turnId via turn_start event
  */
 export interface PromptSubmitResponse {
   accepted: boolean;
   roomKey: string;
   roomId: string;
   sessionId: string | undefined;
-  turnId: string;
   timestamp: string;
 }
 

@@ -3,7 +3,6 @@ import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildLiveTranscript } from "../transcript.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
-import { generateTurnId } from "../webui-types.js";
 
 export function routeLive(piBackend: PiSessionBackend, workingDirectory: string) {
   const router = Router();
@@ -142,8 +141,9 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
   });
 
   // POST /api/live/rooms/:roomKey/prompt - Submit prompt to live session
-  // Non-blocking: returns quickly with accepted/started metadata
+  // Non-blocking: returns quickly with accepted metadata
   // Actual output comes through SSE events and transcript
+  // Note: turnId is NOT in response - SSE provides authoritative turnId via turn_start event
   router.post("/:roomKey/prompt", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const roomState = piBackend.getSessionByKey(roomKey);
@@ -160,10 +160,9 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
       return res.status(400).json({ error: "Missing or invalid 'text' field" });
     }
 
-    const turnId = generateTurnId();
     const roomId = roomState.roomId;
 
-    console.log(`[PROMPT] Accepted prompt for room ${roomKey}, turnId ${turnId}, text: "${text.slice(0, 50)}..."`);
+    console.log(`[PROMPT] Accepted prompt for room ${roomKey}, text: "${text.slice(0, 50)}..."`);
 
     // Fire-and-forget: submit prompt without waiting for completion
     // The SSE stream will deliver the actual response
@@ -176,13 +175,12 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
         console.error(`[PROMPT] Error for room ${roomKey}:`, error);
       });
 
-    // Return immediately with accepted metadata
+    // Return immediately with accepted metadata (no turnId - SSE provides authoritative turnId)
     res.json({
       accepted: true,
       roomKey,
       roomId,
       sessionId: roomState.sessionId,
-      turnId,
       timestamp: new Date().toISOString(),
     });
   });
