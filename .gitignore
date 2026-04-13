@@ -1,6 +1,10 @@
 # Build output
 dist/
 
+# TypeScript build info (generated files)
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
 # Environment files (secrets)
 .env*
 !/.env.example

@@ -8,9 +8,13 @@
  * - SSE updates stream in progressively
  * - Prompts submitted to server via onNew
  * - Browser state is only a synchronized view
+ * 
+ * React state synchronization:
+ * - Uses useSyncExternalStore to subscribe to store changes
+ * - Ensures React rerenders when SSE events update the store
  */
 
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import {
   useExternalStoreRuntime,
   Thread,
@@ -71,10 +75,18 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
   }
   const store = storeRef.current;
 
+  // CRITICAL FIX: Use useSyncExternalStore to subscribe to store changes.
+  // This ensures React rerenders when SSE events update the store.
+  // Without this, useExternalStoreRuntime receives stale captured values.
+  const liveState = useSyncExternalStore(
+    store.subscribe,
+    () => store.getState(),
+    () => store.getState() // snapshotForCache - same as getSnapshot for simplicity
+  );
+
   // UI state for loading/errors
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [roomInfo, setRoomInfo] = React.useState<any>(null);
 
   // Load initial transcript from server
   useEffect(() => {
@@ -87,8 +99,6 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
           getLiveRoom(roomKey),
           getTranscript(roomKey),
         ]);
-
-        setRoomInfo(room);
 
         // Convert transcript to messages and update store
         const messages = transcriptToMessages(transcript.items);
@@ -164,10 +174,11 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     []
   );
 
-  // Create ExternalStoreRuntime
+  // Create ExternalStoreRuntime with LIVE state from useSyncExternalStore
+  // liveState is reactive and triggers rerenders when updated
   const runtime = useExternalStoreRuntime({
-    messages: store.getState().messages,
-    isRunning: store.getState().isProcessing,
+    messages: liveState.messages,
+    isRunning: liveState.isProcessing,
     onNew: handleOnNew,
     convertMessage,
   });
@@ -194,14 +205,12 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     <div className="chat-interface">
       <header className="chat-header">
         <h1>Room: {roomKey}</h1>
-        {roomInfo && (
-          <div className="room-meta">
-            <span>Session: {roomInfo.sessionId || 'N/A'}</span>
-            <span className={roomInfo.isProcessing ? 'processing' : ''}>
-              {roomInfo.isProcessing ? 'Processing...' : 'Ready'}
-            </span>
-          </div>
-        )}
+        <div className="room-meta">
+          <span>Session: {liveState.sessionId || 'N/A'}</span>
+          <span className={liveState.isProcessing ? 'processing' : ''}>
+            {liveState.isProcessing ? 'Processing...' : 'Ready'}
+          </span>
+        </div>
       </header>
 
       <div className="chat-container">

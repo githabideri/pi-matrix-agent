@@ -11,15 +11,18 @@ import './styles.css';
 
 function App() {
   // Get room key from URL query parameter or use default
-  const [roomKey, setRoomKey] = React.useState(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get('room') || 'test-room';
-  });
+  const urlParams = React.useMemo(() => new URLSearchParams(window.location.search), []);
+  const urlRoomKey = urlParams.get('room');
+  const initialRoomKey = urlRoomKey || 'test-room';
+  const hasUrlRoomKey = !!urlRoomKey;
 
-  const [showRoomSelector, setShowRoomSelector] = React.useState(true);
+  const [roomKey, setRoomKey] = React.useState(initialRoomKey);
+  const [inputValue, setInputValue] = React.useState(initialRoomKey);
+  const [showRoomSelector, setShowRoomSelector] = React.useState(!hasUrlRoomKey);
 
   const handleRoomSelect = (key: string) => {
-    setRoomKey(key);
+    const trimmedKey = key.trim() || 'test-room';
+    setRoomKey(trimmedKey);
     setShowRoomSelector(false);
   };
 
@@ -32,14 +35,15 @@ function App() {
           <input
             type="text"
             placeholder="Enter room key (e.g., test-room)"
-            defaultValue={roomKey}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                handleRoomSelect(e.currentTarget.value.trim() || 'test-room');
+                handleRoomSelect(inputValue);
               }
             }}
           />
-          <button onClick={() => handleRoomSelect(roomKey)}>Connect</button>
+          <button onClick={() => handleRoomSelect(inputValue)}>Connect</button>
         </div>
         <p className="hint">
           Room key is the hashed identifier for a Matrix room.
