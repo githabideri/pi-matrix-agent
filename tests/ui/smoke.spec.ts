@@ -118,6 +118,78 @@ test.describe('Web UI Smoke Tests', () => {
       const pageRoomKey = await page.evaluate(() => window.ROOM_KEY);
       expect(pageRoomKey).toBe(roomKey);
     });
+
+    /**
+     * REGRESSION TESTS - These tests would have caught the current bug where
+     * load() was never called and the page showed empty shell with "Unknown" status
+     */
+    test('should populate status panel with actual room data', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Wait for data to load (with timeout)
+      await page.waitForTimeout(2000);
+      
+      // Status text should NOT be stuck on "Unknown" (the initial shell state)
+      const statusText = await page.$('.status-text');
+      const statusContent = await statusText?.innerText();
+      
+      // Should be one of the valid states, not "Unknown"
+      expect(statusContent).not.toBe('Unknown');
+      expect(['Idle', 'Processing', 'Streaming', 'Not Live'].includes(statusContent || '')).toBeTruthy();
+    });
+
+    test('should show room ID in status panel fields', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Wait for data to load
+      await page.waitForTimeout(2000);
+      
+      // The status fields area should contain actual room data
+      const statusFields = await page.$('.status-fields');
+      const fieldsContent = await statusFields?.innerText();
+      
+      // Should contain "Room ID" label and some actual content
+      expect(fieldsContent).toContain('Room ID');
+      // Should NOT be empty or just show error message
+      expect(fieldsContent?.length).toBeGreaterThan(30);
+    });
+
+    test('should load data into at least one real panel', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Wait for data to load
+      await page.waitForTimeout(2000);
+      
+      // Check that the page has fetched backend data by verifying:
+      // 1. Status panel has real content (not just headings)
+      const statusPanel = await page.$('.status-panel');
+      const statusContent = await statusPanel?.innerText();
+      
+      // Should contain more than just the heading "Live Status"
+      expect(statusContent?.length).toBeGreaterThan(30);
+      
+      // 2. Status should not be stuck on initial shell state
+      expect(statusContent).not.toContain('Unknown');
+    });
+
+    test('should have fetched backend data (transcript panel populated)', async ({ page }) => {
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Wait for data to load
+      await page.waitForTimeout(2000);
+      
+      // The transcript panel should show either:
+      // - Actual transcript content, OR
+      // - A loaded-state indicator (even if empty)
+      const transcriptPanel = await page.$('.transcript-panel');
+      const transcriptContent = await transcriptPanel?.innerText();
+      
+      // Should have more than just the "Transcript" heading
+      expect(transcriptContent?.length).toBeGreaterThan(15);
+      
+      // Should not be completely empty
+      expect(transcriptContent).toBeTruthy();
+    });
   });
 
   /**
@@ -168,6 +240,36 @@ test.describe('Web UI Smoke Tests', () => {
       // All panels should be visible
       const statusPanel = await page.$('.status-panel');
       expect(statusPanel).not.isNull();
+    });
+
+    /**
+     * REGRESSION TEST - Verifies that the preview page actually fetches backend data
+     * This would have failed before the load() fix was applied
+     */
+    test('preview page fetches backend data on load', async ({ page }) => {
+      // Track if any network requests were made to the API
+      let apiRequestMade = false;
+      
+      page.on('request', (request) => {
+        if (request.url().includes('/api/')) {
+          apiRequestMade = true;
+        }
+      });
+      
+      await page.goto(`${BASE_URL}/app/room/${roomKey}`);
+      
+      // Wait for data to load
+      await page.waitForTimeout(2000);
+      
+      // Verify that API requests were made
+      expect(apiRequestMade).toBeTruthy('Preview page should make API requests to fetch data');
+      
+      // Verify status panel was populated with real data
+      const statusText = await page.$('.status-text');
+      const statusContent = await statusText?.innerText();
+      
+      // Should not be stuck on "Unknown" (initial shell state)
+      expect(statusContent).not.toBe('Unknown');
     });
   });
 

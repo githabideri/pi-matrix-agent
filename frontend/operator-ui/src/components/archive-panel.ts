@@ -7,8 +7,10 @@ import type { ArchiveSession } from "../types.js";
 export class ArchivePanel {
   private container: HTMLElement;
   private archiveListEl: HTMLElement;
+  private roomKey: string;
 
-  constructor() {
+  constructor(roomKey: string) {
+    this.roomKey = roomKey;
     this.container = document.createElement("section");
     this.container.className = "panel archive-panel";
     this.container.innerHTML = `
@@ -24,11 +26,14 @@ export class ArchivePanel {
       return;
     }
 
+    // Archive view route is: /room/:roomKey/archive/:sessionId
+    const archiveBaseUrl = `/room/${encodeURIComponent(this.roomKey)}/archive`;
+
     const listItems = sessions
       .map(
         (session) => `
         <li>
-          <a href="/room/${this.escapeHtml(session.sessionId)}/archive-view" target="_blank">
+          <a href="${archiveBaseUrl}/${encodeURIComponent(session.sessionId)}" target="_blank">
             <code>${this.escapeHtml(session.sessionId)}</code>
           </a>
           ${

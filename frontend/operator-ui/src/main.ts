@@ -28,6 +28,11 @@ function init(): void {
 
   const roomView = new RoomView(roomKey);
   app.appendChild(roomView.render());
+
+  // Load initial data - use void for fire-and-forget with error logging
+  void roomView.load().catch((error) => {
+    console.error("Failed to load room view:", error);
+  });
 }
 
 init();

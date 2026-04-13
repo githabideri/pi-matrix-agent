@@ -24,6 +24,10 @@ export class TranscriptPanel {
     this.renderTranscript();
   }
 
+  getItemCount(): number {
+    return this.items.length;
+  }
+
   appendTextDelta(text: string): void {
     // Find the last assistant message and append to it
     const lastAssistant = this.items.filter((i) => i.kind === "assistant_message").pop();
@@ -63,6 +67,9 @@ export class TranscriptPanel {
   }
 
   private renderThread(group: { user: AnyTranscriptItem; assistant: AnyTranscriptItem[] }): string {
+    // User item is always a user_message kind
+    const userText = group.user.kind === "user_message" ? group.user.text : "[invalid user message]";
+
     const userHtml = `
       <div class="transcript-thread">
         <div class="message user-message">
@@ -70,7 +77,7 @@ export class TranscriptPanel {
             <span class="message-role">User</span>
             <span class="message-time">${this.formatTime(group.user.timestamp)}</span>
           </div>
-          <div class="message-content">${this.escapeHtml(group.user.text)}</div>
+          <div class="message-content">${this.escapeHtml(userText)}</div>
         </div>
     `;
 

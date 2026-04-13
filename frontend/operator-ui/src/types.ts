@@ -95,7 +95,63 @@ export interface ArchiveSession {
  */
 export type SSEEventType = "run_start" | "run_end" | "text_delta" | "tool_start" | "tool_end" | "state_change";
 
-export interface SSEEvent {
-  type: SSEEventType;
-  data: any;
+/**
+ * SSE event for run_start
+ */
+export interface RunStartEvent {
+  type: "run_start";
+  timestamp: string;
 }
+
+/**
+ * SSE event for run_end
+ */
+export interface RunEndEvent {
+  type: "run_end";
+  timestamp: string;
+}
+
+/**
+ * SSE event for text_delta - uses `delta` field, not `data.text`
+ */
+export interface TextDeltaEvent {
+  type: "text_delta";
+  delta: string;
+  timestamp: string;
+}
+
+/**
+ * SSE event for tool_start
+ */
+export interface ToolStartEvent {
+  type: "tool_start";
+  toolName: string;
+  toolCallId?: string;
+  timestamp: string;
+}
+
+/**
+ * SSE event for tool_end
+ */
+export interface ToolEndEvent {
+  type: "tool_end";
+  toolName: string;
+  toolCallId?: string;
+  success: boolean;
+  timestamp: string;
+}
+
+/**
+ * Union type for all SSE events - matches actual backend format
+ */
+export type SSEEvent =
+  | RunStartEvent
+  | RunEndEvent
+  | TextDeltaEvent
+  | ToolStartEvent
+  | ToolEndEvent
+  | {
+      type: "state_change";
+      timestamp: string;
+      [key: string]: any;
+    };

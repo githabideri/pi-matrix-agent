@@ -7,7 +7,6 @@ import { ArchivePanel } from "./components/archive-panel.js";
 import { ManifestPanel } from "./components/manifest-panel.js";
 import { LiveStatusPanel } from "./components/status-panel.js";
 import { TranscriptPanel } from "./components/transcript-panel.js";
-import type { ArchiveSession, ContextManifestResponse, LiveRoomResponse, TranscriptResponse } from "./types.js";
 
 export class RoomView {
   private roomKey: string;
@@ -22,38 +21,92 @@ export class RoomView {
     this.liveStatusPanel = new LiveStatusPanel();
     this.manifestPanel = new ManifestPanel();
     this.transcriptPanel = new TranscriptPanel();
-    this.archivePanel = new ArchivePanel();
+    this.archivePanel = new ArchivePanel(roomKey);
   }
 
   async load(): Promise<void> {
     try {
-      // Load initial data
-      const [roomData, manifest, transcript, archives] = await Promise.all([
-        getLiveRoom(this.roomKey).catch(() => null as LiveRoomResponse | null),
-        getContextManifest(this.roomKey).catch(() => null as ContextManifestResponse | null),
-        getLiveTranscript(this.roomKey).catch(() => null as TranscriptResponse | null),
-        getArchiveSessions(this.roomKey).catch(() => [] as ArchiveSession[]),
-      ]);
+      console.log(`[RoomView] Loading room: ${this.roomKey}`);
 
-      // Render panels
-      if (roomData) {
-        this.liveStatusPanel.update(roomData);
-      }
-      if (manifest) {
-        this.manifestPanel.update(manifest);
-      }
-      if (transcript) {
-        this.transcriptPanel.setInitialTranscript(transcript.items);
-      }
-      this.archivePanel.update(archives);
+      // Load initial data
+      await this.refreshAll();
 
       // Connect to SSE for live updates
       this.connectSSE();
 
       // Start polling for updates
       this.startPolling();
+
+      console.log(`[RoomView] Room loaded successfully`);
     } catch (error) {
       console.error("Failed to load room data:", error);
+    }
+  }
+
+  /**
+   * Refresh all data from the server.
+   */
+  async refreshAll(): Promise<void> {
+    await Promise.all([this.refreshRoom(), this.refreshManifest(), this.refreshTranscript(), this.refreshArchives()]);
+  }
+
+  /**
+   * Refresh room details.
+   */
+  async refreshRoom(): Promise<void> {
+    try {
+      const roomData = await getLiveRoom(this.roomKey);
+      this.liveStatusPanel.update(roomData);
+      console.log(`[RoomView] Room refreshed: ${roomData.roomId}`);
+    } catch (error: any) {
+      console.warn(`[RoomView] Failed to refresh room: ${error?.message || error}`);
+      this.liveStatusPanel.update(null);
+    }
+  }
+
+  /**
+   * Refresh context manifest.
+   */
+  async refreshManifest(): Promise<void> {
+    try {
+      const manifest = await getContextManifest(this.roomKey);
+      this.manifestPanel.update(manifest);
+      console.log(`[RoomView] Manifest refreshed: ${manifest?.toolNames.length || 0} tools`);
+    } catch (error: any) {
+      console.warn(`[RoomView] Failed to refresh manifest: ${error?.message || error}`);
+      this.manifestPanel.update(null);
+    }
+  }
+
+  /**
+   * Refresh transcript.
+   */
+  async refreshTranscript(): Promise<void> {
+    try {
+      const transcript = await getLiveTranscript(this.roomKey);
+      if (transcript) {
+        // Only update if we don't already have content (avoid clearing SSE deltas)
+        if (this.transcriptPanel.getItemCount() === 0) {
+          this.transcriptPanel.setInitialTranscript(transcript.items);
+        }
+      }
+      console.log(`[RoomView] Transcript refreshed: ${transcript?.items?.length || 0} items`);
+    } catch (error: any) {
+      console.warn(`[RoomView] Failed to refresh transcript: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Refresh archived sessions.
+   */
+  async refreshArchives(): Promise<void> {
+    try {
+      const archives = await getArchiveSessions(this.roomKey);
+      this.archivePanel.update(archives);
+      console.log(`[RoomView] Archives refreshed: ${archives?.length || 0} sessions`);
+    } catch (error: any) {
+      console.warn(`[RoomView] Failed to refresh archives: ${error?.message || error}`);
+      this.archivePanel.update([]);
     }
   }
 
@@ -71,21 +124,29 @@ export class RoomView {
   }
 
   private handleSSEEvent(event: any): void {
+    console.log(`[RoomView] SSE event: ${event.type}`);
+
     switch (event.type) {
       case "text_delta":
-        this.transcriptPanel.appendTextDelta(event.data?.text || "");
+        // Backend sends: { type: "text_delta", delta: "..." }
+        // NOT { type: "text_delta", data: { text: "..." } }
+        this.transcriptPanel.appendTextDelta(event.delta || "");
         break;
       case "run_start":
+        console.log(`[RoomView] Run started`);
         this.liveStatusPanel.setProcessing(true);
         break;
       case "run_end":
+        console.log(`[RoomView] Run ended - refreshing transcript`);
         this.liveStatusPanel.setProcessing(false);
+        // Refresh transcript to get final persisted content
+        void this.refreshTranscript();
         break;
       case "tool_start":
-        // Could add tool event to transcript
+        console.log(`[RoomView] Tool started: ${event.toolName}`);
         break;
       case "tool_end":
-        // Could add tool event to transcript
+        console.log(`[RoomView] Tool ended: ${event.toolName}, success: ${event.success}`);
         break;
     }
   }
@@ -93,21 +154,16 @@ export class RoomView {
   private startPolling(): void {
     // Poll every 5 seconds for state updates
     setInterval(() => {
-      getLiveRoom(this.roomKey)
-        .then((roomData) => {
-          this.liveStatusPanel.update(roomData);
-        })
-        .catch(() => {
-          // Room might be gone
-        });
+      // Always refresh room details and archives on every cycle
+      void this.refreshRoom();
+      void this.refreshArchives();
 
-      getArchiveSessions(this.roomKey)
-        .then((archives) => {
-          this.archivePanel.update(archives);
-        })
-        .catch(() => {
-          // Ignore errors
-        });
+      // Refresh manifest and transcript less frequently (every 3rd cycle = 15s)
+      // to reduce server load while still catching updates
+      if ((Date.now() / 5000) % 3 < 1) {
+        void this.refreshManifest();
+        void this.refreshTranscript();
+      }
     }, 5000);
   }
 
