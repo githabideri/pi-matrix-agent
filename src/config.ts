@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 
 export interface Config {
   homeserverUrl: string;
@@ -19,6 +19,18 @@ export interface Config {
   // Control server config
   controlPort?: number;
   controlHost?: string;
+  // Control public URL (fallback, env var takes precedence)
+  controlPublicUrl?: string;
+}
+
+export interface RuntimeConfig {
+  config: Config;
+  configPath: string;
+  controlPort: number;
+  controlHost: string;
+  controlPublicUrl: string;
+  frontendDistPath: string;
+  frontendDistExists: boolean;
 }
 
 export function loadConfig(): Config {
@@ -66,4 +78,142 @@ export function getControlPublicUrl(config: any): string {
   }
   // Default placeholder - user should configure this
   return "http://localhost:9000";
+}
+
+/**
+ * Validate runtime prerequisites and log warnings.
+ * Does not crash - only logs warnings.
+ */
+export function validateRuntime(config: Config): void {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // Check CONTROL_PUBLIC_URL
+  if (!process.env.CONTROL_PUBLIC_URL && !config.controlPublicUrl) {
+    warnings.push(
+      "CONTROL_PUBLIC_URL not set. !control will return fallback/local URLs instead of public Tailscale URL. " +
+        "Set CONTROL_PUBLIC_URL=https://<your-node>.<tailnet>.ts.net at startup for correct behavior.",
+    );
+  }
+
+  // Check agentDir
+  if (!config.agentDir) {
+    errors.push("agentDir is missing from config.json. Bot isolation will not work correctly.");
+  } else if (!existsSync(config.agentDir)) {
+    warnings.push(`agentDir '${config.agentDir}' does not exist. It will be created on first use.`);
+  }
+
+  // Check workingDirectory
+  if (config.workingDirectory && !existsSync(config.workingDirectory)) {
+    errors.push(`workingDirectory '${config.workingDirectory}' does not exist.`);
+  }
+
+  // Check sessionBaseDir
+  if (!existsSync(config.sessionBaseDir)) {
+    warnings.push(`sessionBaseDir '${config.sessionBaseDir}' does not exist. It will be created on first use.`);
+  }
+
+  // Check frontend dist directory
+  const frontendDistPath = "./frontend/operator-ui/dist";
+  const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);
+  if (!frontendDistExists) {
+    warnings.push(
+      `Frontend not built at '${frontendDistPath}/index.html'. "` +
+        `/app/room/:roomKey" will not work until frontend is built. Run: cd frontend/operator-ui && npm run build`,
+    );
+  }
+
+  // Log errors
+  for (const error of errors) {
+    console.error(`[Runtime Validation] ERROR: ${error}`);
+  }
+
+  // Log warnings
+  for (const warning of warnings) {
+    console.warn(`[Runtime Validation] WARNING: ${warning}`);
+  }
+
+  // Create missing directories if needed
+  if (config.agentDir && !existsSync(config.agentDir)) {
+    try {
+      mkdirSync(config.agentDir, { recursive: true });
+      console.log(`[Runtime Validation] Created agentDir: ${config.agentDir}`);
+    } catch (err) {
+      console.error(`[Runtime Validation] Failed to create agentDir '${config.agentDir}':`, err);
+    }
+  }
+
+  if (!existsSync(config.sessionBaseDir)) {
+    try {
+      mkdirSync(config.sessionBaseDir, { recursive: true });
+      console.log(`[Runtime Validation] Created sessionBaseDir: ${config.sessionBaseDir}`);
+    } catch (err) {
+      console.error(`[Runtime Validation] Failed to create sessionBaseDir '${config.sessionBaseDir}':`, err);
+    }
+  }
+
+  // Exit if critical errors
+  if (errors.length > 0) {
+    console.error(`[Runtime Validation] ${errors.length} critical error(s) found. Aborting startup.`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Print effective runtime config summary.
+ */
+export function printRuntimeConfig(
+  config: Config,
+  controlPort: number,
+  controlHost: string,
+  controlPublicUrl: string,
+): void {
+  const frontendDistPath = "./frontend/operator-ui/dist";
+  const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);
+
+  console.log("==========================================================");
+  console.log("           PI-MATRIX-AGENT RUNTIME CONFIG");
+  console.log("==========================================================");
+  console.log(`Config file:      ${process.env.CONFIG_FILE || "./config.json"}`);
+  console.log(`Working dir:      ${config.workingDirectory || process.cwd()}`);
+  console.log(`Session base:     ${config.sessionBaseDir}`);
+  console.log(`Agent dir:        ${config.agentDir}`);
+  console.log(`Storage file:     ${config.storageFile}`);
+  console.log(`------------------------------------------------------`);
+  console.log(`Matrix homeserver:  ${config.homeserverUrl}`);
+  console.log(`Bot user ID:      ${config.botUserId}`);
+  console.log(`Allowed rooms:    ${config.allowedRoomIds.length}`);
+  console.log(`Allowed users:    ${config.allowedUserIds.length}`);
+  console.log(`------------------------------------------------------`);
+  console.log(`Control host:       ${controlHost}`);
+  console.log(`Control port:       ${controlPort}`);
+  console.log(`Control URL:        http://${controlHost}:${controlPort}`);
+  console.log(`Control public URL: ${controlPublicUrl}`);
+  console.log(`------------------------------------------------------`);
+  console.log(`Frontend dist:      ${frontendDistPath}`);
+  console.log(`Frontend built:     ${frontendDistExists ? "yes" : "no"}`);
+  console.log("==========================================================");
+}
+
+/**
+ * Load config and compute full runtime configuration.
+ */
+export function loadRuntimeConfig(): RuntimeConfig {
+  const configPath = process.env.CONFIG_FILE || "./config.json";
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  const controlPort = getControlPort();
+  const controlHost = getControlHost();
+  const controlPublicUrl = getControlPublicUrl(config);
+  const frontendDistPath = "./frontend/operator-ui/dist";
+  const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);
+
+  return {
+    config: config as Config,
+    configPath,
+    controlPort,
+    controlHost,
+    controlPublicUrl,
+    frontendDistPath,
+    frontendDistExists,
+  };
 }

@@ -84,7 +84,13 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           const controlUrl = `${options.controlUrl}/room/${roomState.roomKey}`;
           await config.sink.reply(msg.roomId, msg.eventId, `Control view: ${controlUrl}`);
         } else {
-          await config.sink.reply(msg.roomId, msg.eventId, "Control URL unavailable - room not found in live state.");
+          // Room not in live state yet - user needs to send a message first
+          await config.sink.reply(
+            msg.roomId,
+            msg.eventId,
+            "Control URL unavailable - no active session for this room yet.\n" +
+              "Send a message first to create a session, then try !control again.",
+          );
         }
       } else {
         await config.sink.reply(msg.roomId, msg.eventId, "Control server not configured.");

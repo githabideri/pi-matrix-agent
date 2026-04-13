@@ -1,28 +1,79 @@
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PiSessionBackend } from "../../src/pi-backend.js";
 
+// Helper to create a minimal test agentDir with required Pi config files
+async function createTestAgentDir(): Promise<string> {
+  const agentDir = join(tmpdir(), `pi-agent-test-${Date.now()}`);
+  await mkdir(agentDir, { recursive: true });
+
+  // Create minimal settings.json
+  await writeFile(
+    join(agentDir, "settings.json"),
+    JSON.stringify(
+      {
+        theme: "dark",
+      },
+      null,
+      2,
+    ),
+  );
+
+  // Create minimal models.json (empty registry)
+  await writeFile(
+    join(agentDir, "models.json"),
+    JSON.stringify(
+      {
+        providers: [],
+        models: [],
+      },
+      null,
+      2,
+    ),
+  );
+
+  // Create auth.json (empty auth)
+  await writeFile(
+    join(agentDir, "auth.json"),
+    JSON.stringify(
+      {
+        providers: {},
+      },
+      null,
+      2,
+    ),
+  );
+
+  return agentDir;
+}
+
 describe("PiSessionBackend", () => {
   let backend: PiSessionBackend;
-  let testDir: string;
+  let sessionTestDir: string;
+  let agentTestDir: string;
 
   beforeEach(async () => {
-    // Create a temporary directory for test sessions
-    testDir = join(tmpdir(), `pi-backend-test-${Date.now()}`);
-    await mkdir(testDir, { recursive: true });
+    // Create temporary directories for test sessions and agent config
+    sessionTestDir = join(tmpdir(), `pi-backend-test-${Date.now()}`);
+    await mkdir(sessionTestDir, { recursive: true });
+
+    // Create test agentDir with minimal config
+    agentTestDir = await createTestAgentDir();
 
     backend = new PiSessionBackend({
-      sessionBaseDir: testDir,
+      sessionBaseDir: sessionTestDir,
       cwd: process.cwd(),
+      agentDir: agentTestDir,
     });
   });
 
   afterEach(async () => {
     // Clean up
     await backend.dispose();
-    await rm(testDir, { recursive: true, force: true });
+    await rm(sessionTestDir, { recursive: true, force: true });
+    await rm(agentTestDir, { recursive: true, force: true });
   });
 
   it("creates sessions for different rooms", async () => {

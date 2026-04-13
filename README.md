@@ -161,17 +161,35 @@ Create `config.json`:
   "botUserId": "@bot:your-server",
   "allowedRoomIds": ["!roomid:your-server"],
   "allowedUserIds": ["@user:your-server"],
-  "storageFile": "./matrix.db",
+  "storageFile": "./storage/bot.json",
   "sessionBaseDir": "./sessions",
   "workingDirectory": "/path/to/working/dir",
+  "agentDir": "/path/to/agent/dir",
   "controlPublicUrl": "https://your-tailscale-serve-url"
 }
 ```
 
+Key fields:
+- `agentDir`: Dedicated Pi agent directory for bot isolation (required)
+- `sessionBaseDir`: Directory for per-room session files
+- `workingDirectory`: Working directory for tool operations
+- `controlPublicUrl`: Tailscale Serve URL for `!control` command (optional - can also use `CONTROL_PUBLIC_URL` env var)
+
 ### Running
 
+**Recommended: Use the canonical startup script**
+
 ```bash
-# Start the bot
+# Start with CONTROL_PUBLIC_URL set (recommended)
+CONTROL_PUBLIC_URL=https://your-tailscale-serve-url ./scripts/run-bot.sh
+
+# Start without (bot works, but !control returns fallback URLs)
+./scripts/run-bot.sh
+```
+
+**Alternative: Direct startup**
+
+```bash
 CONTROL_PUBLIC_URL=https://your-tailscale-serve-url \
   CONFIG_FILE=./config.json \
   node dist/index.js
@@ -322,6 +340,8 @@ pi-matrix-agent/
 │   └── css/
 │       └── style.css
 ├── scripts/
+│   ├── run-bot.sh              # Canonical startup script
+│   ├── check-runtime.sh        # Runtime diagnostics
 │   ├── smoke-local.sh
 │   ├── smoke-control.sh
 │   ├── smoke-matrix.sh
@@ -342,6 +362,8 @@ pi-matrix-agent/
 | `npm run build` | Compile to JavaScript |
 | `npm test` | Run unit tests |
 | `npm run verify` | Full verification (test + check + build) |
+| `./scripts/run-bot.sh` | **Canonical startup script** |
+| `./scripts/check-runtime.sh` | Runtime diagnostics |
 | `npm run smoke:local` | Local smoke test |
 | `npm run smoke:control` | Control API smoke test |
 | `npm run smoke:matrix` | Matrix smoke test |
@@ -385,6 +407,16 @@ curl -X POST "$MATRIX_HOMESERVER/_matrix/client/r0/rooms/$MATRIX_ROOM_ID/send/m.
 
 ## Troubleshooting
 
+### Quick Diagnostics
+
+```bash
+# Run comprehensive runtime check
+./scripts/check-runtime.sh
+
+# Check specific room (replace <roomKey>)
+./scripts/check-runtime.sh <roomKey>
+```
+
 ### Bot Not Responding
 
 ```bash
@@ -407,8 +439,8 @@ npm run check:single-process
 # Kill all old processes
 pkill -f "node dist/index.js"
 
-# Restart cleanly
-CONTROL_PUBLIC_URL=... CONFIG_FILE=... node dist/index.js
+# Restart cleanly using the canonical startup script
+CONTROL_PUBLIC_URL=... ./scripts/run-bot.sh
 ```
 
 ### WebUI Not Accessible
@@ -423,6 +455,20 @@ tailscale serve status
 # Check Tailscale is up
 tailscale status
 ```
+
+### !control Returns Wrong URL
+
+If `!control` returns `http://localhost:9000/room/...` instead of your Tailscale URL:
+
+```bash
+# Check if CONTROL_PUBLIC_URL is set
+env | grep CONTROL_PUBLIC_URL
+
+# Restart bot with CONTROL_PUBLIC_URL set
+CONTROL_PUBLIC_URL=https://your-node.your-tailnet.ts.net ./scripts/run-bot.sh
+```
+
+**Important**: `CONTROL_PUBLIC_URL` must be set **at process startup** - setting it later won't affect an already-running bot.
 
 ## License
 

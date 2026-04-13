@@ -1,4 +1,4 @@
-import { getControlHost, getControlPort, getControlPublicUrl, loadConfig } from "./config.js";
+import { loadRuntimeConfig, printRuntimeConfig, validateRuntime } from "./config.js";
 import { ControlServer } from "./control-server.js";
 import { MatrixTransport } from "./matrix.js";
 import { PiSessionBackend } from "./pi-backend.js";
@@ -22,11 +22,15 @@ process.on("uncaughtException", (error) => {
 async function main() {
   console.log("Starting pi-matrix-agent...");
 
-  const config = loadConfig();
-  console.log(`Connected to: ${config.homeserverUrl}`);
-  console.log(`Allowed rooms: ${config.allowedRoomIds.join(", ")}`);
-  console.log(`Allowed users: ${config.allowedUserIds.join(", ")}`);
-  console.log(`Session base dir: ${config.sessionBaseDir}`);
+  // Load full runtime configuration
+  const runtime = loadRuntimeConfig();
+  const config = runtime.config;
+
+  // Validate runtime prerequisites
+  validateRuntime(config);
+
+  // Print effective runtime config
+  printRuntimeConfig(config, runtime.controlPort, runtime.controlHost, runtime.controlPublicUrl);
 
   // Create pi session backend (stateful, per-room sessions)
   const piBackend = new PiSessionBackend({
@@ -45,17 +49,12 @@ async function main() {
   );
 
   // Create control server
-  const controlPort = getControlPort();
-  const controlHost = getControlHost();
   const controlServer = new ControlServer(piBackend, config.workingDirectory || process.cwd(), config.sessionBaseDir, {
-    port: controlPort,
-    host: controlHost,
+    port: runtime.controlPort,
+    host: runtime.controlHost,
   });
 
-  const controlUrl = `http://${controlHost}:${controlPort}`;
-  const controlPublicUrl = getControlPublicUrl(config);
-  console.log(`Control server URL: ${controlUrl}`);
-  console.log(`Control public URL: ${controlPublicUrl}`);
+  const controlPublicUrl = runtime.controlPublicUrl;
 
   // Set up message handler
   transport.onMessage(async (msg: IncomingMessage) => {
