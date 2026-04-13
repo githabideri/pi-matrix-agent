@@ -100,6 +100,35 @@ export class ControlServer {
     // Serve built frontend assets - comes AFTER room route
     const frontendDistPath = path.join(__dirname, "../frontend/operator-ui/dist");
     this.app.use("/app", express.static(frontendDistPath));
+
+    // Assistant UI Spike routes (/spike)
+    console.log("[ControlServer] Mounting assistant-ui spike at /spike");
+
+    const spikeDistPath = path.join(__dirname, "../frontend/assistant-ui-spike/dist");
+
+    // Serve spike index.html with room key from query param
+    this.app.get("/spike", async (_req: Request, res: Response) => {
+      const fs = await import("fs/promises");
+      const indexPath = path.join(spikeDistPath, "index.html");
+
+      try {
+        let html = await fs.readFile(indexPath, "utf-8");
+
+        // Fix asset paths
+        html = html.replace(/\/assets\//g, "/spike/assets/");
+
+        // Update title
+        html = html.replace(/<title>.*?<\/title>/, `<title>Assistant UI Spike</title>`);
+
+        res.type("html").send(html);
+      } catch (error) {
+        console.error("Error serving spike page:", error);
+        res.status(500).send("Error loading spike page");
+      }
+    });
+
+    // Serve spike assets
+    this.app.use("/spike", express.static(spikeDistPath));
   }
 
   async start(): Promise<void> {
