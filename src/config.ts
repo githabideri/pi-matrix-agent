@@ -41,8 +41,10 @@ export function loadConfig(): Config {
 
 /**
  * Get control server port from env or config, with default.
+ * Resolution order: 1. CONTROL_PORT env var, 2. config.controlPort, 3. default 9000
  */
-export function getControlPort(): number {
+export function getControlPort(config: Config): number {
+  // 1. Env var takes precedence
   const envPort = process.env.CONTROL_PORT;
   if (envPort) {
     const parsed = parseInt(envPort, 10);
@@ -50,16 +52,30 @@ export function getControlPort(): number {
       return parsed;
     }
   }
-  // Default port
+  // 2. Config file value
+  if (config?.controlPort) {
+    return config.controlPort;
+  }
+  // 3. Default port
   return 9000;
 }
 
 /**
  * Get control server host from env or config, with default.
+ * Resolution order: 1. CONTROL_HOST env var, 2. config.controlHost, 3. default 127.0.0.1
  * Default to 127.0.0.1 - Tailscale Serve exposes it to tailnet.
  */
-export function getControlHost(): string {
-  return process.env.CONTROL_HOST || "127.0.0.1";
+export function getControlHost(config: Config): string {
+  // 1. Env var takes precedence
+  if (process.env.CONTROL_HOST) {
+    return process.env.CONTROL_HOST;
+  }
+  // 2. Config file value
+  if (config?.controlHost) {
+    return config.controlHost;
+  }
+  // 3. Default host
+  return "127.0.0.1";
 }
 
 /**
@@ -201,8 +217,8 @@ export function printRuntimeConfig(
 export function loadRuntimeConfig(): RuntimeConfig {
   const configPath = process.env.CONFIG_FILE || "./config.json";
   const config = JSON.parse(readFileSync(configPath, "utf-8"));
-  const controlPort = getControlPort();
-  const controlHost = getControlHost();
+  const controlPort = getControlPort(config);
+  const controlHost = getControlHost(config);
   const controlPublicUrl = getControlPublicUrl(config);
   const frontendDistPath = "./frontend/operator-ui/dist";
   const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);

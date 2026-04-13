@@ -9,6 +9,10 @@
 
 set -e
 
+# Resolve repo root (this script is in scripts/)
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Control server defaults
 CONTROL_HOST="${CONTROL_HOST:-127.0.0.1}"
 CONTROL_PORT="${CONTROL_PORT:-9000}"
@@ -50,7 +54,7 @@ echo ""
 
 # Check 4: Frontend dist
 echo "[4] Frontend Build"
-FRONTEND_INDEX="./frontend/operator-ui/dist/index.html"
+FRONTEND_INDEX="$REPO_ROOT/frontend/operator-ui/dist/index.html"
 if [ -f "$FRONTEND_INDEX" ]; then
     echo "    ✓ Built: $FRONTEND_INDEX"
 else
