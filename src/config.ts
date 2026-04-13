@@ -14,6 +14,8 @@ export interface Config {
   inferenceModel: string;
   inferenceApiKey: string;
   inferenceMaxTokens?: number;
+  // Dedicated Pi agent directory for bot isolation
+  agentDir: string;
   // Control server config
   controlPort?: number;
   controlHost?: string;

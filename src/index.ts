@@ -32,6 +32,7 @@ async function main() {
   const piBackend = new PiSessionBackend({
     sessionBaseDir: config.sessionBaseDir,
     cwd: config.workingDirectory || process.cwd(),
+    agentDir: config.agentDir,
   });
 
   // Create Matrix transport

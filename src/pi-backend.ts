@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
 import { type LiveRoomState, RoomStateManager } from "./room-state.js";
@@ -5,17 +6,22 @@ import { type LiveRoomState, RoomStateManager } from "./room-state.js";
 export interface PiSessionBackendOptions {
   sessionBaseDir: string;
   cwd?: string;
+  agentDir: string;
 }
 
 export class PiSessionBackend {
   private sessionBaseDir: string;
   private cwd: string;
+  private agentDir: string;
   private roomStateManager: RoomStateManager;
 
   constructor(options: PiSessionBackendOptions) {
     this.sessionBaseDir = options.sessionBaseDir;
     this.cwd = options.cwd ?? process.cwd();
+    this.agentDir = options.agentDir;
     this.roomStateManager = new RoomStateManager();
+
+    console.log(`[PiSessionBackend] Using dedicated agentDir: ${this.agentDir}`);
 
     // Recovery: Clear any stuck processing states on startup
     // This handles the case where the bot crashed while processing
@@ -57,16 +63,19 @@ export class PiSessionBackend {
     // Use continueRecent to resume existing session or create new one
     const sessionManager = SessionManager.continueRecent(this.cwd, roomSessionDir);
 
-    // Set up auth storage and model registry
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
+    // Set up auth storage and model registry with dedicated agentDir
+    const authPath = join(this.agentDir, "auth.json");
+    const modelsPath = join(this.agentDir, "models.json");
+    const authStorage = AuthStorage.create(authPath);
+    const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
 
-    // Create the agent session
+    // Create the agent session with explicit agentDir
     const { session, modelFallbackMessage } = await createAgentSession({
       sessionManager,
       authStorage,
       modelRegistry,
       cwd: this.cwd,
+      agentDir: this.agentDir,
     });
 
     if (modelFallbackMessage) {
@@ -272,16 +281,19 @@ export class PiSessionBackend {
       // Use SessionManager.create to explicitly create a new session
       const sessionManager = SessionManager.create(this.cwd, roomSessionDir);
 
-      // Step 6: Set up auth storage and model registry
-      const authStorage = AuthStorage.create();
-      const modelRegistry = ModelRegistry.create(authStorage);
+      // Step 6: Set up auth storage and model registry with dedicated agentDir
+      const authPath = join(this.agentDir, "auth.json");
+      const modelsPath = join(this.agentDir, "models.json");
+      const authStorage = AuthStorage.create(authPath);
+      const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
 
-      // Step 7: Create the new agent session
+      // Step 7: Create the new agent session with explicit agentDir
       const { session, modelFallbackMessage } = await createAgentSession({
         sessionManager,
         authStorage,
         modelRegistry,
         cwd: this.cwd,
+        agentDir: this.agentDir,
       });
 
       if (modelFallbackMessage) {
@@ -520,14 +532,17 @@ export class PiSessionBackend {
   }
 
   async openArchivedSession(path: string): Promise<AgentSession> {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
+    const authPath = join(this.agentDir, "auth.json");
+    const modelsPath = join(this.agentDir, "models.json");
+    const authStorage = AuthStorage.create(authPath);
+    const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
 
     const { session } = await createAgentSession({
       sessionManager: SessionManager.open(path),
       authStorage,
       modelRegistry,
       cwd: this.cwd,
+      agentDir: this.agentDir,
     });
 
     return session;
