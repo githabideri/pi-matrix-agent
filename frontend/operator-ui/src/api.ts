@@ -15,6 +15,18 @@ import type {
 const API_BASE = "/api";
 
 /**
+ * Prompt submission response
+ */
+export interface PromptSubmitResponse {
+  accepted: boolean;
+  roomKey: string;
+  roomId: string;
+  sessionId: string | undefined;
+  turnId: string;
+  timestamp: string;
+}
+
+/**
  * Get live room details.
  */
 export async function getLiveRoom(roomKey: string): Promise<LiveRoomResponse> {
@@ -43,6 +55,25 @@ export async function getLiveTranscript(roomKey: string): Promise<TranscriptResp
   const res = await fetch(`${API_BASE}/live/rooms/${roomKey}/transcript`);
   if (!res.ok) {
     throw new Error(`Failed to get transcript: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+/**
+ * Submit a prompt to the live room session.
+ * Non-blocking: returns quickly with accepted/started metadata.
+ * Actual output comes through SSE events and transcript.
+ */
+export async function submitPrompt(roomKey: string, text: string): Promise<PromptSubmitResponse> {
+  const res = await fetch(`${API_BASE}/live/rooms/${roomKey}/prompt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to submit prompt: ${res.status} ${res.statusText}`);
   }
   return res.json();
 }

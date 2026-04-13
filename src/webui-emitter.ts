@@ -1,0 +1,295 @@
+/**
+ * WebUI SSE Event Emitter
+ *
+ * Wraps a Pi agent session and emits normalized WebUI events.
+ * Converts Pi agent/core events to the WebUI event schema.
+ *
+ * Design:
+ * - Emits events in real-time as they occur
+ * - Maintains turn state for proper event sequencing
+ * - Can be attached to HTTP response streams for SSE
+ * - Handles cleanup on disconnect
+ */
+
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { WebUIEvent } from "./webui-types.js";
+import { generateTurnId } from "./webui-types.js";
+
+export interface WebUIEmitterOptions {
+  /** Matrix room ID */
+  roomId: string;
+
+  /** Hashed room key */
+  roomKey: string;
+
+  /** Current session ID */
+  sessionId: string;
+}
+
+export class WebUIEmitter {
+  private roomId: string;
+  private _roomKey: string;
+  private sessionId: string;
+
+  /** Public getter for roomKey (used by attachEmitterToSSE) */
+  get roomKey(): string {
+    return this._roomKey;
+  }
+
+  // State tracking
+  private currentTurnId?: string;
+
+  // Subscription
+  private unsubscribe?: () => void;
+  private eventListeners: Array<(event: WebUIEvent) => void> = [];
+
+  constructor(options: WebUIEmitterOptions) {
+    this.roomId = options.roomId;
+    this._roomKey = options.roomKey;
+    this.sessionId = options.sessionId;
+  }
+
+  /**
+   * Add an event listener.
+   */
+  onEvent(listener: (event: WebUIEvent) => void): () => void {
+    this.eventListeners.push(listener);
+    return () => {
+      const idx = this.eventListeners.indexOf(listener);
+      if (idx >= 0) {
+        this.eventListeners.splice(idx, 1);
+      }
+    };
+  }
+
+  /**
+   * Start emitting events from the session.
+   */
+  start(session: AgentSession): void {
+    // Clear any previous state
+    this.clearState();
+
+    // Subscribe to session events
+    this.unsubscribe = session.subscribe((event) => {
+      this.handleAgentEvent(event);
+    });
+
+    // Emit session_connected event
+    this.emit({
+      type: "session_connected",
+      roomId: this.roomId,
+      roomKey: this._roomKey,
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Stop emitting events.
+   */
+  stop(): void {
+    // Unsubscribe
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = undefined;
+    }
+
+    // Clear state
+    this.clearState();
+  }
+
+  /**
+   * Handle Pi agent events and convert to WebUI events.
+   */
+  private handleAgentEvent(event: any): void {
+    switch (event.type) {
+      case "turn_start":
+        this.handleTurnStart(event);
+        break;
+
+      case "turn_end":
+        this.handleTurnEnd(event);
+        break;
+
+      case "message_update":
+        this.handleMessageUpdate(event);
+        break;
+
+      case "tool_execution_start":
+        this.handleToolStart(event);
+        break;
+
+      case "tool_execution_end":
+        this.handleToolEnd(event);
+        break;
+    }
+  }
+
+  private handleTurnStart(event: any): void {
+    this.currentTurnId = generateTurnId();
+
+    this.emit({
+      type: "turn_start",
+      roomId: this.roomId,
+      roomKey: this._roomKey,
+      sessionId: this.sessionId,
+      turnId: this.currentTurnId!,
+      promptPreview: event.userMessage?.content?.slice?.(0, 50),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  private handleTurnEnd(event: any): void {
+    const turnId = this.currentTurnId;
+
+    this.emit({
+      type: "turn_end",
+      roomId: this.roomId,
+      roomKey: this._roomKey,
+      sessionId: this.sessionId,
+      turnId: turnId!,
+      success: !event.error,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Clear turn state
+    this.currentTurnId = undefined;
+  }
+
+  private handleMessageUpdate(event: any): void {
+    const assistantMessageEvent = event.assistantMessageEvent;
+    if (!assistantMessageEvent) return;
+
+    switch (assistantMessageEvent.type) {
+      case "text_delta":
+        this.emit({
+          type: "message_update",
+          roomId: this.roomId,
+          roomKey: this._roomKey,
+          sessionId: this.sessionId,
+          turnId: this.currentTurnId!,
+          role: "assistant",
+          content: {
+            type: "text_delta",
+            delta: assistantMessageEvent.delta,
+          },
+          timestamp: new Date().toISOString(),
+        });
+        break;
+
+      case "thinking_delta":
+        this.emit({
+          type: "message_update",
+          roomId: this.roomId,
+          roomKey: this._roomKey,
+          sessionId: this.sessionId,
+          turnId: this.currentTurnId!,
+          role: "assistant",
+          content: {
+            type: "thinking_delta",
+            delta: assistantMessageEvent.delta,
+          },
+          timestamp: new Date().toISOString(),
+        });
+        break;
+    }
+  }
+
+  private handleToolStart(event: any): void {
+    const toolExecutionEvent = event.toolExecutionEvent;
+    if (!toolExecutionEvent) return;
+
+    this.emit({
+      type: "tool_start",
+      roomId: this.roomId,
+      roomKey: this._roomKey,
+      sessionId: this.sessionId,
+      toolCallId: toolExecutionEvent.toolCallId || generateTurnId(),
+      turnId: this.currentTurnId!,
+      toolName: toolExecutionEvent.name,
+      arguments: JSON.stringify(toolExecutionEvent.arguments),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  private handleToolEnd(event: any): void {
+    const toolResultEvent = event.toolResultEvent;
+    if (!toolResultEvent) return;
+
+    this.emit({
+      type: "tool_end",
+      roomId: this.roomId,
+      roomKey: this._roomKey,
+      sessionId: this.sessionId,
+      toolCallId: toolResultEvent.toolCallId || generateTurnId(),
+      turnId: this.currentTurnId!,
+      toolName: toolResultEvent.name,
+      success: !toolResultEvent.isError,
+      result: String(toolResultEvent.result || "").slice(0, 500),
+      error: toolResultEvent.isError ? String(toolResultEvent.error) : undefined,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Clear all tracked state.
+   */
+  private clearState(): void {
+    this.currentTurnId = undefined;
+  }
+
+  /**
+   * Emit an event to all listeners.
+   */
+  private emit(event: WebUIEvent): void {
+    for (const listener of this.eventListeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error("[WebUIEmitter] Error in event listener:", err);
+      }
+    }
+  }
+}
+
+/**
+ * Create an SSE response handler that streams WebUI events.
+ */
+export function attachEmitterToSSE(res: any, emitter: WebUIEmitter): () => void {
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  // Track cleanup
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    emitter.stop();
+    res.end();
+  };
+
+  // Handle client disconnect
+  const onClose = () => {
+    console.log(`[SSE] Client disconnected for room ${emitter.roomKey}`);
+    cleanup();
+  };
+
+  res.on("close", onClose);
+
+  // Set up event handler
+  emitter.onEvent((event: WebUIEvent) => {
+    try {
+      // Write event to SSE stream
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch (err) {
+      console.error(`[SSE] Error writing event:`, err);
+      cleanup();
+    }
+  });
+
+  return cleanup;
+}

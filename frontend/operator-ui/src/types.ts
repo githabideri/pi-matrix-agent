@@ -91,29 +91,164 @@ export interface ArchiveSession {
 }
 
 /**
- * SSE event types
+ * SSE Event Types (Normalized WebUI Schema)
+ *
+ * The new normalized event schema:
+ * - session_connected: SSE connection established
+ * - turn_start: user prompt received (maps from legacy run_start)
+ * - message_update: text/thinking content delta (maps from legacy text_delta)
+ * - tool_start: tool execution begins
+ * - tool_end: tool execution completes
+ * - turn_end: response complete (maps from legacy run_end)
+ * - state_change: processing state changes
+ *
+ * Legacy compatibility: old event names are still supported for backwards compatibility
  */
-export type SSEEventType = "run_start" | "run_end" | "text_delta" | "tool_start" | "tool_end" | "state_change";
 
 /**
- * SSE event for run_start
+ * SSE event types (new normalized schema)
+ */
+export type SSEEventType =
+  | "session_connected"
+  | "turn_start"
+  | "message_update"
+  | "tool_start"
+  | "tool_end"
+  | "turn_end"
+  | "state_change"
+  | "error"
+  // Legacy compatibility
+  | "run_start"
+  | "run_end"
+  | "text_delta";
+
+/**
+ * Common event metadata
+ */
+interface BaseSSEEvent {
+  type: SSEEventType;
+  timestamp: string;
+  roomId?: string;
+  roomKey?: string;
+}
+
+/**
+ * SSE event for session_connected
+ */
+export interface SessionConnectedEvent extends BaseSSEEvent {
+  type: "session_connected";
+  sessionId?: string;
+}
+
+/**
+ * SSE event for turn_start (maps from legacy run_start)
+ */
+export interface TurnStartEvent extends BaseSSEEvent {
+  type: "turn_start";
+  turnId: string;
+  sessionId: string;
+  promptPreview?: string;
+}
+
+/**
+ * SSE event for message_update (maps from legacy text_delta)
+ */
+export interface MessageUpdateEvent extends BaseSSEEvent {
+  type: "message_update";
+  turnId: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: TextDeltaContent | ThinkingDeltaContent;
+}
+
+/**
+ * Text content delta
+ */
+export interface TextDeltaContent {
+  type: "text_delta";
+  delta: string;
+}
+
+/**
+ * Thinking content delta
+ */
+export interface ThinkingDeltaContent {
+  type: "thinking_delta";
+  delta: string;
+}
+
+/**
+ * SSE event for tool_start
+ */
+export interface ToolStartEvent extends BaseSSEEvent {
+  type: "tool_start";
+  toolCallId: string;
+  turnId: string;
+  sessionId: string;
+  toolName: string;
+  arguments?: string;
+}
+
+/**
+ * SSE event for tool_end
+ */
+export interface ToolEndEvent extends BaseSSEEvent {
+  type: "tool_end";
+  toolCallId: string;
+  turnId: string;
+  sessionId: string;
+  toolName: string;
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+/**
+ * SSE event for turn_end (maps from legacy run_end)
+ */
+export interface TurnEndEvent extends BaseSSEEvent {
+  type: "turn_end";
+  turnId: string;
+  sessionId: string;
+  success: boolean;
+}
+
+/**
+ * SSE event for state_change
+ */
+export interface StateChangeEvent extends BaseSSEEvent {
+  type: "state_change";
+  sessionId: string;
+  changeType: "processing_start" | "processing_end" | "model_change" | "thinking_level_change" | "session_reset";
+  state?: {
+    isProcessing?: boolean;
+    model?: string;
+    thinkingLevel?: string;
+  };
+}
+
+/**
+ * SSE event for error
+ */
+export interface ErrorEvent extends BaseSSEEvent {
+  type: "error";
+  message: string;
+  code?: string;
+}
+
+/**
+ * Legacy SSE events for backwards compatibility
  */
 export interface RunStartEvent {
   type: "run_start";
   timestamp: string;
 }
 
-/**
- * SSE event for run_end
- */
 export interface RunEndEvent {
   type: "run_end";
   timestamp: string;
 }
 
-/**
- * SSE event for text_delta - uses `delta` field, not `data.text`
- */
 export interface TextDeltaEvent {
   type: "text_delta";
   delta: string;
@@ -121,37 +256,45 @@ export interface TextDeltaEvent {
 }
 
 /**
- * SSE event for tool_start
- */
-export interface ToolStartEvent {
-  type: "tool_start";
-  toolName: string;
-  toolCallId?: string;
-  timestamp: string;
-}
-
-/**
- * SSE event for tool_end
- */
-export interface ToolEndEvent {
-  type: "tool_end";
-  toolName: string;
-  toolCallId?: string;
-  success: boolean;
-  timestamp: string;
-}
-
-/**
- * Union type for all SSE events - matches actual backend format
+ * Union type for all SSE events - new normalized schema + legacy compatibility
  */
 export type SSEEvent =
-  | RunStartEvent
-  | RunEndEvent
-  | TextDeltaEvent
+  | SessionConnectedEvent
+  | TurnStartEvent
+  | MessageUpdateEvent
   | ToolStartEvent
   | ToolEndEvent
-  | {
-      type: "state_change";
-      timestamp: string;
-      [key: string]: any;
-    };
+  | TurnEndEvent
+  | StateChangeEvent
+  | ErrorEvent
+  // Legacy compatibility
+  | RunStartEvent
+  | RunEndEvent
+  | TextDeltaEvent;
+
+/**
+ * Check if an event is a message update with text content
+ */
+export function isTextDelta(event: SSEEvent): event is MessageUpdateEvent {
+  return event.type === "message_update" && (event as MessageUpdateEvent).content.type === "text_delta";
+}
+
+/**
+ * Check if an event is a legacy text_delta event
+ */
+export function isLegacyTextDelta(event: SSEEvent): event is TextDeltaEvent {
+  return event.type === "text_delta";
+}
+
+/**
+ * Extract text delta from any event type (handles both new and legacy formats)
+ */
+export function getTextDelta(event: SSEEvent): string | null {
+  if (event.type === "message_update" && (event as MessageUpdateEvent).content.type === "text_delta") {
+    return (event as MessageUpdateEvent).content.delta;
+  }
+  if (event.type === "text_delta") {
+    return (event as TextDeltaEvent).delta;
+  }
+  return null;
+}

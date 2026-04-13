@@ -127,26 +127,64 @@ export class RoomView {
     console.log(`[RoomView] SSE event: ${event.type}`);
 
     switch (event.type) {
+      // New normalized schema
+      case "message_update":
+        // New format: { type: "message_update", content: { type: "text_delta", delta: "..." } }
+        if (event.content?.type === "text_delta") {
+          this.transcriptPanel.appendTextDelta(event.content.delta || "");
+        }
+        break;
+
+      // Legacy compatibility
       case "text_delta":
-        // Backend sends: { type: "text_delta", delta: "..." }
-        // NOT { type: "text_delta", data: { text: "..." } }
+        // Legacy format: { type: "text_delta", delta: "..." }
         this.transcriptPanel.appendTextDelta(event.delta || "");
         break;
-      case "run_start":
-        console.log(`[RoomView] Run started`);
+
+      case "turn_start":
+        console.log(`[RoomView] Turn started: ${event.turnId}`);
         this.liveStatusPanel.setProcessing(true);
         break;
-      case "run_end":
-        console.log(`[RoomView] Run ended - refreshing transcript`);
+
+      // Legacy compatibility
+      case "run_start":
+        console.log(`[RoomView] Run started (legacy)`);
+        this.liveStatusPanel.setProcessing(true);
+        break;
+
+      case "turn_end":
+        console.log(`[RoomView] Turn ended: ${event.turnId} - refreshing transcript`);
         this.liveStatusPanel.setProcessing(false);
         // Refresh transcript to get final persisted content
         void this.refreshTranscript();
         break;
+
+      // Legacy compatibility
+      case "run_end":
+        console.log(`[RoomView] Run ended (legacy) - refreshing transcript`);
+        this.liveStatusPanel.setProcessing(false);
+        void this.refreshTranscript();
+        break;
+
       case "tool_start":
         console.log(`[RoomView] Tool started: ${event.toolName}`);
         break;
+
       case "tool_end":
         console.log(`[RoomView] Tool ended: ${event.toolName}, success: ${event.success}`);
+        break;
+
+      case "state_change":
+        console.log(`[RoomView] State change: ${event.changeType}`);
+        if (event.changeType === "processing_start") {
+          this.liveStatusPanel.setProcessing(true);
+        } else if (event.changeType === "processing_end") {
+          this.liveStatusPanel.setProcessing(false);
+        }
+        break;
+
+      case "session_connected":
+        console.log(`[RoomView] Session connected: ${event.sessionId || "(unknown)"}`);
         break;
     }
   }

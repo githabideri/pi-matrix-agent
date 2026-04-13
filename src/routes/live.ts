@@ -2,6 +2,8 @@ import { type Request, type Response, Router } from "express";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildLiveTranscript } from "../transcript.js";
+import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
+import { generateTurnId } from "../webui-types.js";
 
 export function routeLive(piBackend: PiSessionBackend, workingDirectory: string) {
   const router = Router();
@@ -139,6 +141,52 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
     }
   });
 
+  // POST /api/live/rooms/:roomKey/prompt - Submit prompt to live session
+  // Non-blocking: returns quickly with accepted/started metadata
+  // Actual output comes through SSE events and transcript
+  router.post("/:roomKey/prompt", async (req: Request, res: Response) => {
+    const roomKey = req.params.roomKey;
+    const roomState = piBackend.getSessionByKey(roomKey);
+
+    if (!roomState) {
+      console.log(`[PROMPT] Room ${roomKey} not found`);
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    const { text } = req.body;
+
+    if (!text || typeof text !== "string") {
+      console.log(`[PROMPT] Invalid request body for room ${roomKey}`);
+      return res.status(400).json({ error: "Missing or invalid 'text' field" });
+    }
+
+    const turnId = generateTurnId();
+    const roomId = roomState.roomId;
+
+    console.log(`[PROMPT] Accepted prompt for room ${roomKey}, turnId ${turnId}, text: "${text.slice(0, 50)}..."`);
+
+    // Fire-and-forget: submit prompt without waiting for completion
+    // The SSE stream will deliver the actual response
+    piBackend
+      .prompt(roomId, text)
+      .then((response) => {
+        console.log(`[PROMPT] Completed for room ${roomKey}, response length: ${response.length}`);
+      })
+      .catch((error) => {
+        console.error(`[PROMPT] Error for room ${roomKey}:`, error);
+      });
+
+    // Return immediately with accepted metadata
+    res.json({
+      accepted: true,
+      roomKey,
+      roomId,
+      sessionId: roomState.sessionId,
+      turnId,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // POST /api/live/rooms/:roomKey/reset - Reset live session
   router.post("/:roomKey/reset", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
@@ -157,86 +205,36 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
     }
   });
 
-  // GET /api/live/rooms/:roomKey/events - SSE event stream
+  // GET /api/live/rooms/:roomKey/events - SSE event stream (normalized WebUI events)
   router.get("/:roomKey/events", (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const roomState = piBackend.getSessionByKey(roomKey);
 
     if (!roomState) {
+      console.log(`[SSE] Room ${roomKey} not found`);
       return res.status(404).json({ error: "Room not found" });
     }
 
-    // Set up SSE response
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-
-    // Send initial connection event
-    res.write(`event: connected\ndata: {"roomKey": "${roomKey}", "timestamp": "${new Date().toISOString()}"}\n\n`);
-
-    // Subscribe to session events
-    const unsubscribe = roomState.session.subscribe((event) => {
-      // Filter and format events for SSE
-      let eventData: any;
-
-      switch (event.type) {
-        case "message_start":
-          eventData = { type: "run_start", timestamp: new Date().toISOString() };
-          break;
-        case "message_update":
-          if (event.assistantMessageEvent.type === "text_delta") {
-            eventData = {
-              type: "text_delta",
-              delta: event.assistantMessageEvent.delta,
-              timestamp: new Date().toISOString(),
-            };
-          }
-          break;
-        case "tool_execution_start":
-          eventData = {
-            type: "tool_start",
-            toolName: (event as any).toolExecutionEvent?.name,
-            toolCallId: (event as any).toolExecutionEvent?.toolCallId,
-            timestamp: new Date().toISOString(),
-          };
-          break;
-        case "tool_execution_end":
-          eventData = {
-            type: "tool_end",
-            toolName: (event as any).toolResultEvent?.name,
-            toolCallId: (event as any).toolResultEvent?.toolCallId,
-            success: !(event as any).toolResultEvent?.isError,
-            timestamp: new Date().toISOString(),
-          };
-          break;
-        case "message_end":
-          eventData = { type: "run_end", timestamp: new Date().toISOString() };
-          break;
-        default:
-          // Pass through other events with sanitized data
-          eventData = {
-            type: event.type,
-            timestamp: new Date().toISOString(),
-          };
-      }
-
-      if (eventData) {
-        try {
-          res.write(`data: ${JSON.stringify(eventData)}\n\n`);
-        } catch (err) {
-          console.error("Error writing SSE event:", err);
-        }
-      }
+    // Create WebUI emitter for this room
+    const emitter = new WebUIEmitter({
+      roomId: roomState.roomId,
+      roomKey: roomKey,
+      sessionId: roomState.sessionId || "",
     });
+
+    // Attach emitter to SSE response
+    const cleanup = attachEmitterToSSE(res, emitter);
+
+    // Start emitting events
+    emitter.start(roomState.session);
+
+    console.log(`[SSE] Client connected for room ${roomKey}`);
 
     // Cleanup on client disconnect
     req.on("close", () => {
       console.log(`[SSE] Client disconnected for room ${roomKey}`);
-      unsubscribe();
+      cleanup();
     });
-
-    console.log(`[SSE] Client connected for room ${roomKey}`);
   });
 
   return router;
