@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import { join } from "node:path";
 import type { RoomModelState, RoomModelsStore } from "./types.js";
 
@@ -33,8 +34,6 @@ export class RoomModelManager {
    * Handles missing, malformed, and corrupt files gracefully.
    */
   private load(): void {
-    const fs = require("fs") as typeof import("fs");
-
     // Load room models store
     try {
       if (!fs.existsSync(this.storePath)) {
@@ -85,7 +84,6 @@ export class RoomModelManager {
    */
   private loadGlobalDefault(): void {
     try {
-      const fs = require("fs") as typeof import("fs");
       const settingsPath = join(this.agentDir, "settings.json");
 
       if (!fs.existsSync(settingsPath)) {
@@ -121,8 +119,6 @@ export class RoomModelManager {
    */
   private save(): void {
     try {
-      const fs = require("fs") as typeof import("fs");
-
       // Write to temp file first, then rename (atomic on most filesystems)
       const tempPath = `${this.storePath}.tmp.${process.pid}`;
       fs.writeFileSync(tempPath, JSON.stringify(this.store, null, 2), "utf-8");

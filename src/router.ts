@@ -226,10 +226,6 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
               lines.push(`  Active model: ${result.activeModel}`);
             }
             lines.push("");
-            lines.push("Phase 2: This is now room-persistent.");
-            lines.push("  - Survives service restart");
-            lines.push("  - Survives !reset");
-            lines.push("  - Does not affect other rooms");
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           } else {

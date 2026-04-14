@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
@@ -98,7 +99,8 @@ export class PiSessionBackend {
     this.updateSnapshotFromSession(roomState, session);
 
     // Phase 2: Apply desired room model if it differs from active model
-    this.applyDesiredRoomModelIfDifferent(roomId, session);
+    // Await to ensure model is applied before returning the session
+    await this.applyDesiredRoomModelIfDifferent(roomId, session);
 
     return session;
   }
@@ -179,10 +181,11 @@ export class PiSessionBackend {
       return; // Already on desired model
     }
 
-    // Apply desired model
+    // Apply desired model with global default preservation
     console.log(`[PiSessionBackend] Applying desired model "${desiredModelProfile}" to room ${roomId}`);
     try {
-      await session.setModel(targetModel);
+      // Use the safe helper that preserves global default
+      await this.applyModelWithGlobalDefaultRestore(session, targetModel);
 
       // Update snapshot
       const roomState = this.roomStateManager.get(roomId);
@@ -363,7 +366,8 @@ export class PiSessionBackend {
       const _newRoomState = this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
 
       // Phase 2: Apply desired room model if it differs from active model
-      this.applyDesiredRoomModelIfDifferent(roomId, session);
+      // Await to ensure model is applied before considering reset complete
+      await this.applyDesiredRoomModelIfDifferent(roomId, session);
 
       console.log(`[PiSessionBackend] Reset complete for room ${roomId}`);
     } catch (error) {
@@ -684,6 +688,67 @@ export class PiSessionBackend {
   }
 
   /**
+   * Read settings.json from agent directory.
+   * Used to preserve/restore global default during room-level model switches.
+   */
+  /**
+   * Read current global default settings from settings.json.
+   * Returns null on error.
+   */
+  private readSettings(): any {
+    try {
+      const settingsPath = join(this.agentDir, "settings.json");
+      const content = fs.readFileSync(settingsPath, "utf-8");
+      return JSON.parse(content);
+    } catch (error: any) {
+      console.error(`[PiSessionBackend] Error reading settings.json: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Write settings to agent directory.
+   * Logs error but does not throw.
+   */
+  private writeSettings(settings: any): void {
+    try {
+      const settingsPath = join(this.agentDir, "settings.json");
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+    } catch (error: any) {
+      console.error(`[PiSessionBackend] Error writing settings.json: ${error.message}`);
+    }
+  }
+
+  /**
+   * Apply a model to a session while preserving the global default.
+   *
+   * This helper prevents global default contamination by:
+   * 1. Reading the current global default from settings.json
+   * 2. Applying the target model via session.setModel()
+   * 3. Restoring the original global default in a finally block
+   *
+   * @param session The agent session to apply the model to
+   * @param targetModel The target model object from the model registry
+   * @returns The active model ID after applying
+   * @throws If setModel fails, the global default is still restored
+   */
+  private async applyModelWithGlobalDefaultRestore(session: any, targetModel: any): Promise<string> {
+    // Read original global default
+    const originalSettings = this.readSettings();
+
+    try {
+      // Apply the target model (this mutates settings.json as a side effect)
+      await session.setModel(targetModel);
+      return session.model?.id || session.model?.name || "unknown";
+    } finally {
+      // Always restore the original global default, even if setModel threw
+      if (originalSettings) {
+        this.writeSettings(originalSettings);
+      }
+    }
+  }
+
+  /**
    * Get model status for a room.
    * Reports the ACTIVE runtime model from the session/snapshot, not from settings.json.
    *
@@ -792,20 +857,14 @@ export class PiSessionBackend {
       // Get current active model for status message
       const previousActiveModel = session.model?.id || session.model?.name || "previous";
 
-      // Call SDK setModel - this updates:
-      // 1. session.agent.state.model (runtime)
-      // 2. session file (appends model_change entry)
-      // 3. settings.json (global default - SIDE EFFECT, but we track per-room desired model)
-      await session.setModel(targetModel);
+      // Use the safe helper that preserves global default (with finally block)
+      const activeModel = await this.applyModelWithGlobalDefaultRestore(session, targetModel);
 
       // Phase 2: Persist desired model per room (independent of global default)
       this.roomModelManager.setDesiredModel(roomId, requestedProfile, targetModel.id);
 
       // Update snapshot immediately
       this.updateSnapshotFromSession(roomState, session);
-
-      // Verify the switch by reading back the active model
-      const activeModel = session.model?.id || session.model?.name || "unknown";
 
       console.log(
         `[PiSessionBackend] Model switched for room ${roomId}: ${previousActiveModel} -> ${activeModel} (desired: ${requestedProfile})`,

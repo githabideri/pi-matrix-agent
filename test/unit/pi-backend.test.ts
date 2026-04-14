@@ -865,9 +865,9 @@ describe("PiSessionBackend model persistence across resume", () => {
     await backend2.dispose();
   });
 
-  it("verifies persistence mechanism: global default vs session file", async () => {
-    // This test verifies HOW persistence works.
-    // It checks if the model is restored from the session file or global default.
+  it("verifies global default preservation: room switch does not contaminate global default", async () => {
+    // This test verifies that room-level model switches do NOT contaminate the global default.
+    // The global default should remain unchanged after a room-level switch.
 
     const backend1 = new PiSessionBackend({
       sessionBaseDir: sessionTestDir,
@@ -878,24 +878,34 @@ describe("PiSessionBackend model persistence across resume", () => {
     const roomId = "!room1:example.com";
     await backend1.getOrCreateSession(roomId);
 
+    // Read original settings
+    const fs = await import("fs/promises");
+    const settingsPath = join(agentTestDir, "settings.json");
+    const originalSettings = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+
+    console.log(`[TEST] Original settings:`, originalSettings);
+
     // Switch to gemma4
     await backend1.switchModel(roomId, "gemma4");
 
-    // Read settings.json to see if default was updated
-    const fs = await import("fs/promises");
-    const settingsPath = join(agentTestDir, "settings.json");
-    const settings = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    // Read settings.json after switch
+    const settingsAfterSwitch = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
 
-    console.log(`[TEST] Settings after switch:`, settings);
+    console.log(`[TEST] Settings after switch:`, settingsAfterSwitch);
 
-    // The SDK's setModel() updates the global default
-    expect(settings.defaultProvider).toBe("llama-cpp-gemma4");
-    expect(settings.defaultModel).toBe("test-model-gemma");
+    // The global default should NOT have changed
+    expect(settingsAfterSwitch.defaultProvider).toBe(originalSettings.defaultProvider);
+    expect(settingsAfterSwitch.defaultModel).toBe(originalSettings.defaultModel);
+
+    // But the room's active model should be gemma4
+    const roomStatus = await backend1.getModelStatus(roomId);
+    expect(roomStatus!.model).toBe("test-model-gemma");
+    expect(roomStatus!.desiredModel).toBe("gemma4");
 
     await backend1.dispose();
 
     // Now create a completely NEW room (different hash)
-    // This room should get the switched model as its default
+    // This room should get the ORIGINAL global default, not the switched model
     const backend2 = new PiSessionBackend({
       sessionBaseDir: sessionTestDir,
       cwd: process.cwd(),
@@ -909,8 +919,8 @@ describe("PiSessionBackend model persistence across resume", () => {
 
     console.log(`[TEST] New room model: ${newRoomStatus!.model}`);
 
-    // New room gets the switched model because it's now the global default
-    expect(newRoomStatus!.model).toBe("test-model-gemma");
+    // New room gets the original global default (qwen27), NOT the switched model
+    expect(newRoomStatus!.model).toBe("test-model-qwen");
 
     await backend2.dispose();
   });

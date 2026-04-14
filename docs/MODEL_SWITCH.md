@@ -61,11 +61,6 @@ Successful switch response:
   Requested: qwen27
   Resolved to: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
   Active model: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
-
-Phase 2: This is now room-persistent.
-  - Survives service restart
-  - Survives !reset
-  - Does not affect other rooms
 ```
 
 ### Clear Room Override
@@ -216,11 +211,6 @@ Bot: ✓ Model switch successful
       Requested: qwen27
       Resolved to: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
       Active model: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
-
-      Phase 2: This is now room-persistent.
-        - Survives service restart
-        - Survives !reset
-        - Does not affect other rooms
 ```
 
 ### Checking Status

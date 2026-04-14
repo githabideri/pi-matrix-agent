@@ -2,6 +2,26 @@
 
 This document describes how to interact with the Matrix bot via the Matrix Client API.
 
+## Quick Start: Test Script
+
+For quick testing, use the built-in test script:
+
+```bash
+# Copy the example environment file
+cp .env.matrix.example .env.matrix
+
+# Edit with your configuration
+# (or set via environment variables)
+
+# Source and use
+source .env.matrix
+./scripts/matrix-test.sh send '!m -s'  # Send model status command
+./scripts/matrix-test.sh status 5      # Show last 5 messages
+./scripts/matrix-test.sh wait          # Wait for bot to be idle
+```
+
+See [scripts/matrix-test.sh](../scripts/matrix-test.sh) for full documentation.
+
 ## Prerequisites
 
 - Homeserver URL (e.g., `http://your-homeserver:8008`)
@@ -136,13 +156,20 @@ sendMessage('Hello, bot!').then(console.log);
 
 ## Environment Variables for Testing
 
-Create a `.env` file for your test environment:
+Copy `.env.matrix.example` to `.env.matrix` and configure:
+
+```bash
+cp .env.matrix.example .env.matrix
+```
+
+Then edit `.env.matrix`:
 
 ```bash
 # .env.matrix
 MATRIX_HOMESERVER="http://your-homeserver:8008"
 MATRIX_ACCESS_TOKEN="your-access-token"
 MATRIX_ROOM_ID="!roomid:example.com"
+MATRIX_ADMIN_ACCESS_TOKEN="your-admin-token"  # Optional, for @pi-admin
 ```
 
 Then source it in your scripts:
@@ -153,6 +180,14 @@ curl -X POST "$MATRIX_HOMESERVER/_matrix/client/r0/rooms/$MATRIX_ROOM_ID/send/m.
   -H "Authorization: Bearer $MATRIX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"msgtype":"m.text","body":"test"}'
+```
+
+**Tip:** Use the test script for easier interaction:
+
+```bash
+source .env.matrix
+./scripts/matrix-test.sh send '!m -s'  # Send command
+./scripts/matrix-test.sh status 10     # Show last 10 messages
 ```
 
 ## Notes
