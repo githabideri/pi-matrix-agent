@@ -1,10 +1,15 @@
 import { type Request, type Response, Router } from "express";
+import type { MatrixTransport } from "../matrix.js";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildLiveTranscript } from "../transcript.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
 
-export function routeLive(piBackend: PiSessionBackend, workingDirectory: string) {
+export function routeLive(
+  piBackend: PiSessionBackend,
+  workingDirectory: string,
+  matrixTransport?: MatrixTransport, // Optional: for syncing web UI messages to Matrix
+) {
   const router = Router();
 
   // GET /api/live/rooms - List all live rooms
@@ -164,15 +169,41 @@ export function routeLive(piBackend: PiSessionBackend, workingDirectory: string)
 
     console.log(`[PROMPT] Accepted prompt for room ${roomKey}, text: "${text.slice(0, 50)}..."`);
 
+    // Mirror the prompt to Matrix with [WebUI] prefix
+    // Loop prevention: bot ignores its own messages (event.sender === this.userId)
+    if (matrixTransport) {
+      try {
+        const mirroredPrompt = `[WebUI] ${text}`;
+        await matrixTransport.reply(roomId, "", mirroredPrompt);
+        console.log(`[PROMPT] Mirrored prompt to Matrix room ${roomId}`);
+      } catch (error) {
+        console.warn(`[PROMPT] Failed to mirror prompt to Matrix:`, error);
+        // Don't fail the request - Matrix mirroring is best-effort
+      }
+    }
+
     // Fire-and-forget: submit prompt without waiting for completion
     // The SSE stream will deliver the actual response
     piBackend
       .prompt(roomId, text)
       .then((response) => {
         console.log(`[PROMPT] Completed for room ${roomKey}, response length: ${response.length}`);
+        // Mirror the final response to Matrix
+        if (matrixTransport && response) {
+          matrixTransport
+            .reply(roomId, "", response)
+            .catch((err) => console.warn(`[PROMPT] Failed to mirror response to Matrix:`, err));
+        }
       })
       .catch((error) => {
         console.error(`[PROMPT] Error for room ${roomKey}:`, error);
+        // Optionally mirror error to Matrix
+        if (matrixTransport) {
+          const errorMsg = `[WebUI] Error: ${error instanceof Error ? error.message : String(error)}`;
+          matrixTransport
+            .reply(roomId, "", errorMsg)
+            .catch((err) => console.warn(`[PROMPT] Failed to mirror error to Matrix:`, err));
+        }
       });
 
     // Return immediately with accepted metadata (no turnId - SSE provides authoritative turnId)

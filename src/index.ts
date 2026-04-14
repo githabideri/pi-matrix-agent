@@ -48,11 +48,17 @@ async function main() {
     config.storageFile,
   );
 
-  // Create control server
-  const controlServer = new ControlServer(piBackend, config.workingDirectory || process.cwd(), config.sessionBaseDir, {
-    port: runtime.controlPort,
-    host: runtime.controlHost,
-  });
+  // Create control server (pass matrix transport for web UI → Matrix sync)
+  const controlServer = new ControlServer(
+    piBackend,
+    config.workingDirectory || process.cwd(),
+    config.sessionBaseDir,
+    {
+      port: runtime.controlPort,
+      host: runtime.controlHost,
+    },
+    transport, // Pass matrix transport for syncing web UI messages
+  );
 
   const controlPublicUrl = runtime.controlPublicUrl;
 

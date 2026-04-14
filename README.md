@@ -21,6 +21,7 @@ This bot connects Matrix to a local LLM inference backend via the [@mariozechner
 - **Per-room isolation**: Each Matrix room has independent context
 - **Sender allowlists**: Only authorized users can trigger responses
 - **Typing feedback**: "is typing..." indicator during processing
+- **Web UI mirroring**: Prompts from the web UI are mirrored to Matrix with `[WebUI]` prefix
 
 ### Session Management
 
@@ -48,12 +49,21 @@ This bot connects Matrix to a local LLM inference backend via the [@mariozechner
 
 **WebUI** (same server):
 
+**EJS Operator Pages:**
+
 | Route | Description |
 |-------|-------------|
 | `/room/:roomKey` | Live operator page |
 | `/room/:roomKey/context` | Context manifest page |
 | `/room/:roomKey/archive` | Archive list |
 | `/room/:roomKey/archive/:sessionId` | Archived transcript view |
+
+**Assistant UI Spike:**
+
+| Route | Description |
+|-------|-------------|
+| `/spike` | Modern React-based chat interface |
+| `/spike?room=:roomKey` | Chat interface with room pre-selected |
 
 ### Tailscale Integration
 
@@ -63,10 +73,11 @@ The control server is exposed via **Tailscale Serve** for secure tailnet-only ac
 # Set up Tailscale Serve
 sudo tailscale serve --bg localhost:9000
 
-# Access via: https://<node>.<tailnet>.ts.net/room/<roomKey>
+# Access WebUI via: https://<node>.<tailnet>.ts.net/room/<roomKey>
+# Access Assistant UI Spike via: https://<node>.<tailnet>.ts.net/spike?room=<roomKey>
 ```
 
-The `!control` command returns the Tailscale Serve URL for the current room.
+The `!control` command returns the Tailscale Serve URL for the current room, pointing to the Assistant UI Spike (`/spike?room=<roomKey>`).
 
 ## Known Limitations
 
@@ -82,9 +93,13 @@ The control server runs in the same Node.js process as the SDK. During active in
 
 - **Endpoints that may timeout during inference** (require async file I/O):
   - `GET /api/live/rooms/:roomKey/transcript` (returns empty while processing)
-  - `GET /app/room/:roomKey` (Web UI page)
+  - `GET /room/:roomKey` (Web UI page)
 
 **Workaround**: Poll for `isProcessing: false` before making requests that require file I/O.
+
+### Web UI → Matrix Mirroring
+
+Prompts submitted via the web UI are mirrored to the Matrix room with a `[WebUI]` prefix. The bot ignores its own messages (loop prevention), so mirrored messages don't trigger duplicate runs. The final response is also posted to Matrix once complete.
 
 ## Architecture
 
@@ -100,6 +115,7 @@ The control server runs in the same Node.js process as the SDK. During active in
 │  - Receives room.message events                                 │
 │  - Filters by allowed rooms/users                               │
 │  - Provides typing feedback                                     │
+│  - **Ignores own messages (loop prevention)**                  │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                             ▼
@@ -130,6 +146,15 @@ The control server runs in the same Node.js process as the SDK. During active in
 │  - Express server on 127.0.0.1:9000                             │
 │  - REST API + WebUI                                             │
 │  - SSE event streaming                                          │
+│  - **Web UI → Matrix mirroring**                               │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Web UI                                   │
+│  - EJS operator pages (/room/:roomKey)                         │
+│  - Assistant UI Spike (/spike?room=:roomKey)                   │
+│  - Prompts are mirrored to Matrix with [WebUI] prefix          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response } from "express";
 import type { Server } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { MatrixTransport } from "./matrix.js";
 import type { PiSessionBackend } from "./pi-backend.js";
 import { routeArchive } from "./routes/archive.js";
 import { routeLive } from "./routes/live.js";
@@ -23,18 +24,21 @@ export class ControlServer {
   private sessionBaseDir: string;
   private port: number;
   private host: string;
+  private matrixTransport?: MatrixTransport;
 
   constructor(
     piBackend: PiSessionBackend,
     workingDirectory: string,
     sessionBaseDir: string,
     options?: ControlServerOptions,
+    matrixTransport?: MatrixTransport, // Optional: for syncing web UI messages to Matrix
   ) {
     this.piBackend = piBackend;
     this.workingDirectory = workingDirectory;
     this.sessionBaseDir = sessionBaseDir;
     this.port = options?.port ?? 9000;
     this.host = options?.host ?? "127.0.0.1";
+    this.matrixTransport = matrixTransport;
 
     this.app = express();
 
@@ -58,7 +62,7 @@ export class ControlServer {
     });
 
     // Live room routes (JSON API)
-    this.app.use("/api/live/rooms", routeLive(this.piBackend, this.workingDirectory));
+    this.app.use("/api/live/rooms", routeLive(this.piBackend, this.workingDirectory, this.matrixTransport));
 
     // Archive routes (JSON API)
     this.app.use("/api/archive/rooms", routeArchive(this.piBackend, this.sessionBaseDir));

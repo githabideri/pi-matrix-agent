@@ -81,8 +81,15 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
         // Get room key for URL
         const roomState = (options.sessionRegistry as any)?.getLiveRoomInfo?.(msg.roomId);
         if (roomState?.roomKey) {
-          const controlUrl = `${options.controlUrl}/room/${roomState.roomKey}`;
-          await config.sink.reply(msg.roomId, msg.eventId, `Control view: ${controlUrl}`);
+          // Primary: Assistant UI Spike
+          const spikeUrl = `${options.controlUrl}/spike?room=${encodeURIComponent(roomState.roomKey)}`;
+          // Fallback: Original room view
+          const fallbackUrl = `${options.controlUrl}/room/${roomState.roomKey}`;
+          await config.sink.reply(
+            msg.roomId,
+            msg.eventId,
+            `Assistant UI Spike: ${spikeUrl}\n\n` + `Fallback (original view): ${fallbackUrl}`,
+          );
         } else {
           // Room not in live state yet - user needs to send a message first
           await config.sink.reply(

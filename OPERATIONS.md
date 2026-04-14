@@ -29,11 +29,14 @@ This document describes how to develop, test, build, and deploy the pi-matrix-ag
 
 5. **CONTROL_PUBLIC_URL must be set at startup**: The `!control` command only returns the public Tailscale URL if `CONTROL_PUBLIC_URL` is present as an environment variable when the process starts.
 
-6. **Two web UI routes**:
+6. **Three web UI routes**:
    - `/room/:roomKey` - EJS fallback (always works)
    - `/app/room/:roomKey` - Preview frontend (requires built assets in `frontend/operator-ui/dist`)
+   - `/spike?room=:roomKey` - Assistant UI Spike (modern React interface)
 
 7. **Tailscale Serve is for external access**: Test from another tailnet device, not from the same host (localhost checks bypass Tailscale Serve).
+
+8. **Web UI → Matrix mirroring**: Prompts submitted via web UI are mirrored to Matrix with `[WebUI]` prefix. The bot ignores its own messages (loop prevention).
 
 ### Startup Command (Canonical)
 
@@ -92,7 +95,7 @@ Frontend built:     yes
 
 ### Diagnostics
 
-Run the diagnostics script to check runtime state:
+Run the diagnostics scripts to check runtime state:
 
 ```bash
 # Basic checks
@@ -100,6 +103,12 @@ Run the diagnostics script to check runtime state:
 
 # Also check specific room
 ./scripts/check-runtime.sh <roomKey>
+
+# Check Tailscale Serve status
+./scripts/check-serve.sh
+
+# Set up/reconfigure Tailscale Serve
+./scripts/setup-serve.sh [port] [host]
 ```
 
 ---
@@ -473,3 +482,44 @@ Run these in order after any change:
 | `sessionBaseDir` | string | Yes | Directory for session files |
 | `workingDirectory` | string | No | Working directory for tools (default: process.cwd()) |
 | `controlPublicUrl` | string | No | Public control URL (default: http://localhost:9000) |
+
+---
+
+## Tailscale Serve Helper Scripts
+
+### check-serve.sh
+
+Diagnose Tailscale Serve configuration:
+
+```bash
+./scripts/check-serve.sh
+```
+
+Checks:
+- tailscaled is running
+- Control server is listening on expected port
+- Tailscale Serve is configured
+- Target port matches control server port
+- Control server is reachable locally
+- `/spike` endpoint is working
+
+### setup-serve.sh
+
+Set up or reconfigure Tailscale Serve:
+
+```bash
+# Use defaults (port 9000, host 127.0.0.1)
+./scripts/setup-serve.sh
+
+# Or specify port and host
+./scripts/setup-serve.sh 9000 127.0.0.1
+
+# Or use environment variables
+CONTROL_PORT=9000 CONTROL_HOST=127.0.0.1 ./scripts/setup-serve.sh
+```
+
+This script:
+- Checks if tailscaled is running
+- Resets any existing Serve configuration
+- Sets up Serve to proxy to the control server
+- Verifies the configuration

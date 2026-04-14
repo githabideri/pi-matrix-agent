@@ -4,6 +4,8 @@
 
 This spike explores integrating [assistant-ui](https://www.assistant-ui.com/) as a React frontend for `pi-matrix-agent`, using the `ExternalStoreRuntime` pattern to maintain server-authoritative state.
 
+**Status**: ✅ Complete and functional. Accessible at `/spike?room=<roomKey>`.
+
 ## Design Decisions
 
 ### Why ExternalStoreRuntime?
@@ -76,9 +78,27 @@ The `ExternalStoreRuntime` was chosen over assistant-ui's default runtime becaus
 │  │ /api/live/   │  │ /api/archive │  │  Room State      │  │
 │  │ rooms/:key/  │  │ /rooms/:key/ │  │  Manager         │  │
 │  │ prompt       │  │ sessions     │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│  └──────┬───────┘  └──────────────┘  └──────────────────┘  │
+│         │                                                  │
+│         │ Web UI → Matrix mirroring                        │
+│         ▼                                                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  MatrixTransport (mirrors [WebUI] prompts)           │  │
+│  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Web UI → Matrix Mirroring
+
+Prompts submitted via the web UI are mirrored to the Matrix room:
+
+1. **User submits prompt via web UI** → `POST /api/live/rooms/:roomKey/prompt`
+2. **Control server mirrors to Matrix** as `[WebUI] <prompt text>`
+3. **Agent processes prompt** (single execution)
+4. **Final response posted to Matrix** (not streamed)
+5. **Web UI receives SSE/live updates** as before
+
+**Loop prevention**: The bot ignores its own messages (`event.sender === this.userId`), so mirrored messages don't trigger duplicate runs.
 
 ## Data Flow
 
@@ -315,6 +335,8 @@ npm test
 6. **No archive browsing**: The spike only connects to live rooms, not archived sessions.
 
 7. **Room key entry**: Users must manually enter or know the room key.
+
+8. **Web UI → Matrix mirroring**: Prompts from web UI are mirrored to Matrix with `[WebUI]` prefix. The original user identity is not preserved (no Matrix auth).
 
 ## Phase 2 Migration Considerations
 
