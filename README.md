@@ -17,7 +17,7 @@ This bot connects Matrix to a local LLM inference backend via the [@mariozechner
 ### Matrix Bot
 
 - **Autorespond mode**: Plain text messages from allowlisted users trigger inference
-- **Control commands**: `!ping`, `!status`, `!help`, `!reset`, `!control`
+- **Control commands**: `!ping`, `!status`, `!help`, `!reset`, `!control`, `!model`
 - **Per-room isolation**: Each Matrix room has independent context
 - **Sender allowlists**: Only authorized users can trigger responses
 - **Typing feedback**: "is typing..." indicator during processing
@@ -281,6 +281,8 @@ npm run check:single-process
 
 ## Control Commands
 
+### Basic Commands
+
 | Command | Description |
 |---------|-------------|
 | `!ping` | Check if bot is alive |
@@ -288,6 +290,27 @@ npm run check:single-process
 | `!help` | Show available commands |
 | `!reset` | Clear conversation memory (archives old session) |
 | `!control` | Get WebUI URL for current room |
+
+### Model Switching
+
+| Command | Description |
+|---------|-------------|
+| `!model` | Show current model status |
+| `!model --status` | Show current model status |
+| `!model gemma4` | Switch to Gemma4 model |
+| `!model qwen27` | Switch to Qwen27 model |
+| `!m g4` | Switch to Gemma4 (alias) |
+| `!m q27` | Switch to Qwen27 (alias) |
+
+**Important:** Model switching is a **first-pass operational feature** with limitations:
+- ✅ Live-room switch works without restart
+- ✅ No session wipe needed
+- ⚠️ SDK side effect: Updates bot-global default for new rooms and `!reset`
+- ⚠️ Same-room resume falls back to global default
+
+See [docs/MODEL_SWITCH.md](docs/MODEL_SWITCH.md) for full documentation.
+
+**Shell script alternative:** `./scripts/model-switch.sh gemma4` changes the global default and restarts the service. Use this for batch configuration, not live-room control.
 
 ## WebUI Tour
 

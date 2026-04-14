@@ -161,8 +161,11 @@ sudo ./scripts/model-switch.sh qwen27
 2. **Backs up** current `settings.json`
 3. **Updates** `settings.json` with new provider/model
 4. **Verifies** the update was successful
-5. **Restarts** the systemd service
-6. **Reports** the new active model
+5. **Clears session files** - Session files have model baked in; clearing ensures fresh session with new model
+6. **Restarts** the systemd service
+7. **Reports** the new active model
+
+**Note**: Clearing session files is necessary because the Pi SDK stores the model in each session file. Without clearing, the bot would continue using the old model from the existing session. This means conversation history is lost when switching models.
 
 ### Example Switch Session
 

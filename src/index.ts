@@ -73,9 +73,11 @@ async function main() {
           sink: transport,
         },
         sessionRegistry: piBackend,
+        modelSwitcher: piBackend, // Enable model switching
         controlUrl: controlPublicUrl, // Use public URL for !control command
         startTypingLoop: (roomId) => transport.startTypingLoop(roomId),
         stopTypingLoop: (interval) => transport.stopTypingLoop(interval),
+        isRoomProcessing: (roomId) => piBackend.checkProcessingGuard(roomId) !== null,
       });
     } catch (error) {
       console.error(`Error routing message:`, error);

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
 import { type LiveRoomState, RoomStateManager } from "./room-state.js";
+import type { ModelStatus, ModelSwitchResult } from "./types.js";
 
 export interface PiSessionBackendOptions {
   sessionBaseDir: string;
@@ -581,6 +582,170 @@ export class PiSessionBackend {
    */
   getRoomIdByKey(roomKey: string): string | undefined {
     return this.roomStateManager.getRoomIdByKey(roomKey);
+  }
+
+  private _getModelRegistryForCurrentSession(): any {
+    // Get model registry from first available session
+    for (const state of this.roomStateManager.listLive()) {
+      // Access the session's modelRegistry
+      const session: any = state.session;
+      if (session.modelRegistry) {
+        return session.modelRegistry;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get the model for a given profile by scanning available models.
+   */
+  private findModelByProfile(profile: string): any {
+    const modelRegistry = this._getModelRegistryForCurrentSession();
+    if (!modelRegistry) {
+      return null;
+    }
+
+    // Get all available models
+    const models: any[] = modelRegistry.models || [];
+
+    // Profile name to provider prefix mapping
+    const profileToProviderPrefix: Record<string, string> = {
+      gemma4: "llama-cpp-gemma4",
+      qwen27: "llama-cpp-qwen27",
+    };
+
+    const providerPrefix = profileToProviderPrefix[profile];
+    if (!providerPrefix) {
+      return null;
+    }
+
+    // Find model with matching provider
+    const model = models.find((m) => m.provider === providerPrefix);
+    return model || null;
+  }
+
+  /**
+   * Get model status for a room.
+   * Reports the ACTIVE runtime model from the session/snapshot, not from settings.json.
+   */
+  async getModelStatus(roomId: string): Promise<ModelStatus | null> {
+    const roomState = this.roomStateManager.get(roomId);
+
+    if (!roomState) {
+      return null;
+    }
+
+    // Get model info from runtime session (NOT from settings)
+    let model: string | undefined;
+    let thinkingLevel: string | undefined;
+
+    try {
+      if (roomState.session.model) {
+        model = roomState.session.model.id || roomState.session.model.name || "unknown";
+      }
+      if (roomState.session.thinkingLevel) {
+        thinkingLevel = roomState.session.thinkingLevel;
+      }
+    } catch {
+      // Fallback to snapshot if session access fails
+      model = roomState.snapshot?.model;
+      thinkingLevel = roomState.snapshot?.thinkingLevel;
+    }
+
+    return {
+      active: true,
+      model,
+      thinkingLevel,
+      sessionId: roomState.sessionId,
+      sessionFile: roomState.sessionFile,
+      isProcessing: roomState.isProcessing,
+    };
+  }
+
+  /**
+   * Switch model for a room.
+   * Uses SDK session.setModel() API.
+   *
+   * BEHAVIOR (first-pass operational feature):
+   * - Live-room switch: Works correctly. The active room's model changes immediately.
+   * - No restart needed: The bot continues running without interruption.
+   * - No session wipe needed: Existing conversation history is preserved.
+   *
+   * LIMITATIONS (documented, acceptable for first pass):
+   * - SDK side effect: setModel() updates the bot-global default in settings.json.
+   * - New rooms: Will use the switched model as their default (global side effect).
+   * - Same-room resume: Falls back to global default, NOT the switched model.
+   * - !reset: New session uses global default, NOT the previously switched model.
+   *
+   * This is a pragmatic operator feature for live-room control.
+   * It is NOT a true room-persistent model-control solution.
+   * For genuine room-scoped model persistence, room-level desired model state is needed.
+   */
+  async switchModel(roomId: string, requestedProfile: string): Promise<ModelSwitchResult> {
+    const roomState = this.roomStateManager.get(roomId);
+
+    if (!roomState) {
+      throw new Error(`No active session for room ${roomId}`);
+    }
+
+    // Guard: reject if room is processing
+    if (roomState.isProcessing) {
+      throw new Error(
+        `Cannot switch model while a turn is in progress; try again once idle. Room ${roomId} is currently processing.`,
+      );
+    }
+
+    const session: any = roomState.session;
+
+    // Find the target model
+    const targetModel = this.findModelByProfile(requestedProfile);
+
+    if (!targetModel) {
+      return {
+        success: false,
+        message: `Unknown profile "${requestedProfile}". Available profiles: gemma4, qwen27 (aliases: g4, q27)`,
+        requestedProfile,
+      };
+    }
+
+    // Check if auth is configured
+    const modelRegistry = session.modelRegistry;
+    if (!modelRegistry.hasConfiguredAuth(targetModel)) {
+      return {
+        success: false,
+        message: `No API key configured for model ${targetModel.provider}/${targetModel.id}`,
+        requestedProfile,
+      };
+    }
+
+    try {
+      // Call SDK setModel - this updates:
+      // 1. session.agent.state.model (runtime)
+      // 2. session file (appends model_change entry)
+      // 3. settings.json (global default - SIDE EFFECT)
+      await session.setModel(targetModel);
+
+      // Update snapshot immediately
+      this.updateSnapshotFromSession(roomState, session);
+
+      // Verify the switch by reading back the active model
+      const activeModel = session.model?.id || session.model?.name || "unknown";
+
+      return {
+        success: true,
+        message: `Model switched from "${session.model?.id || "previous"}" to "${activeModel}"`,
+        requestedProfile,
+        resolvedModel: targetModel.id,
+        activeModel,
+      };
+    } catch (error: any) {
+      console.error(`[PiSessionBackend] Error switching model for room ${roomId}:`, error);
+      return {
+        success: false,
+        message: `Failed to switch model: ${error.message}`,
+        requestedProfile,
+      };
+    }
   }
 
   async dispose(): Promise<void> {

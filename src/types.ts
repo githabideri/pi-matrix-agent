@@ -12,10 +12,29 @@ export type ParsedCommand =
   | { kind: "command_reset" }
   | { kind: "command_session" }
   | { kind: "command_control" }
+  | { kind: "command_model_status" }
+  | { kind: "command_model_switch"; profile: string }
   | { kind: "chat_prompt"; prompt: string };
 
 export interface AgentBackend {
   prompt(roomId: string, text: string): Promise<string>;
+}
+
+export interface ModelStatus {
+  active: boolean;
+  model?: string;
+  thinkingLevel?: string;
+  sessionId?: string;
+  sessionFile?: string;
+  isProcessing?: boolean;
+}
+
+export interface ModelSwitchResult {
+  success: boolean;
+  message: string;
+  requestedProfile: string;
+  resolvedModel?: string;
+  activeModel?: string;
 }
 
 export interface ChatMessage {

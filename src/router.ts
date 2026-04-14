@@ -7,13 +7,21 @@ export interface SessionResetter {
   reset(roomId: string): Promise<void>;
 }
 
+// Interface for model switching capability
+export interface ModelSwitcher {
+  switchModel?(roomId: string, profile: string): Promise<any>;
+  getModelStatus?(roomId: string): Promise<any>;
+}
+
 export interface RouterOptions {
   config: RouterConfig;
   sessionRegistry?: SessionResetter;
+  modelSwitcher?: ModelSwitcher;
   controlUrl?: string; // Base URL for control server
   setTyping?: (roomId: string, typing: boolean) => Promise<void>;
   startTypingLoop?: (roomId: string) => NodeJS.Timeout;
   stopTypingLoop?: (interval: NodeJS.Timeout) => void;
+  isRoomProcessing?: (roomId: string) => boolean;
 }
 
 export async function routeMessage(msg: IncomingMessage, options: RouterOptions): Promise<void> {
@@ -52,6 +60,14 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           "  !reset   - Clear conversation memory\n" +
           "  !control - Get control URL for this room\n" +
           "  !help    - Show this help\n" +
+          "\nModel switching:\n" +
+          "  !model        - Show current model status\n" +
+          "  !model --status - Show current model status\n" +
+          "  !model gemma4 - Switch to Gemma4 model\n" +
+          "  !model qwen27 - Switch to Qwen27 model\n" +
+          "  !m g4         - Switch to Gemma4 (alias)\n" +
+          "  !m q27        - Switch to Qwen27 (alias)\n" +
+          "\nNote: Model switch is rejected while a turn is in progress.\n" +
           "\nPlain text messages are sent to pi for inference.",
       );
       return;
@@ -96,6 +112,99 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
         await config.sink.reply(msg.roomId, msg.eventId, "Control server not configured.");
       }
       return;
+
+    case "command_model_status": {
+      // Get model status from backend
+      const modelSwitcher = options.modelSwitcher;
+      if (modelSwitcher?.getModelStatus) {
+        try {
+          const status = await modelSwitcher.getModelStatus(msg.roomId);
+
+          if (!status?.active) {
+            await config.sink.reply(
+              msg.roomId,
+              msg.eventId,
+              "No active session for this room yet. Send a message first.",
+            );
+          } else {
+            // Build status reply
+            const lines: string[] = [];
+            lines.push("Model status:");
+            if (status.model) {
+              lines.push(`  Active model: ${status.model}`);
+            } else {
+              lines.push("  Active model: Not set");
+            }
+            if (status.thinkingLevel) {
+              lines.push(`  Thinking level: ${status.thinkingLevel}`);
+            }
+            if (status.sessionId) {
+              lines.push(`  Session ID: ${status.sessionId}`);
+            }
+            lines.push(`  Session file: ${status.sessionFile || "N/A"}`);
+            if (status.isProcessing) {
+              lines.push("  Status: Processing (busy)");
+            } else {
+              lines.push("  Status: Idle");
+            }
+
+            await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
+          }
+        } catch (error: any) {
+          console.error(`[Router] Error getting model status:`, error);
+          await config.sink.reply(msg.roomId, msg.eventId, "Failed to get model status.");
+        }
+      } else {
+        await config.sink.reply(msg.roomId, msg.eventId, "Model status not available.");
+      }
+      return;
+    }
+
+    case "command_model_switch": {
+      // Check if room is processing
+      if (options.isRoomProcessing?.(msg.roomId)) {
+        await config.sink.reply(
+          msg.roomId,
+          msg.eventId,
+          `Cannot switch model while a turn is in progress; try again once idle.`,
+        );
+        return;
+      }
+
+      // Get model switcher from options
+      const modelSwitcher = options.modelSwitcher;
+      if (modelSwitcher?.switchModel) {
+        try {
+          const result = await modelSwitcher.switchModel(msg.roomId, command.profile);
+
+          if (result.success) {
+            // Build success reply with verification
+            const lines: string[] = [];
+            lines.push(`✓ Model switch successful`);
+            lines.push(`  Requested: ${command.profile}`);
+            if (result.resolvedModel) {
+              lines.push(`  Resolved to: ${result.resolvedModel}`);
+            }
+            if (result.activeModel) {
+              lines.push(`  Active model: ${result.activeModel}`);
+            }
+            lines.push("");
+            lines.push("Note: This also updates the global default. New rooms and !reset will use this model.");
+
+            await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
+          } else {
+            // Failed switch
+            await config.sink.reply(msg.roomId, msg.eventId, `✗ ${result.message}`);
+          }
+        } catch (error: any) {
+          console.error(`[Router] Error switching model:`, error);
+          await config.sink.reply(msg.roomId, msg.eventId, `Failed to switch model: ${error.message}`);
+        }
+      } else {
+        await config.sink.reply(msg.roomId, msg.eventId, "Model switching not available.");
+      }
+      return;
+    }
 
     case "chat_prompt": {
       // Start typing indicator

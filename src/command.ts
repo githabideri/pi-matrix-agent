@@ -1,5 +1,31 @@
 import type { ParsedCommand } from "./types.js";
 
+// Model profile registry - maps aliases to canonical profile names
+const MODEL_ALIASES: Record<string, string> = {
+  g4: "gemma4",
+  q27: "qwen27",
+};
+
+// Canonical profile names (lowercase)
+const CANONICAL_PROFILES = new Set(["gemma4", "qwen27"]);
+
+/**
+ * Resolve a model profile name or alias to canonical form.
+ * Returns undefined if the profile is not recognized.
+ */
+export function resolveModelProfile(rawProfile: string): string | undefined {
+  const lower = rawProfile.toLowerCase();
+  // Check if it's a canonical profile
+  if (CANONICAL_PROFILES.has(lower)) {
+    return lower;
+  }
+  // Check if it's an alias
+  if (MODEL_ALIASES[lower]) {
+    return MODEL_ALIASES[lower];
+  }
+  return undefined;
+}
+
 export function parseCommand(body: string): ParsedCommand {
   const trimmed = body.trim();
 
@@ -12,8 +38,39 @@ export function parseCommand(body: string): ParsedCommand {
       return { kind: "command_help" };
     }
 
-    // Parse known commands
-    switch (commandPart.toLowerCase()) {
+    // Split command from arguments
+    const parts = commandPart.split(/\s+/);
+    const commandWord = parts[0].toLowerCase();
+    const firstArg = parts.length > 1 ? parts[1].toLowerCase() : undefined;
+
+    // Parse !model and !m commands with potential argument
+    if (commandWord === "model" || commandWord === "m") {
+      // Validate: exactly 1-2 parts allowed
+      if (parts.length > 2) {
+        return { kind: "command_help" }; // Malformed - too many args
+      }
+
+      // !model or !m with no arg -> status
+      if (!firstArg) {
+        return { kind: "command_model_status" };
+      }
+
+      // !model --status or !m --status -> status
+      if (firstArg === "--status") {
+        return { kind: "command_model_status" };
+      }
+
+      // !model <profile> or !m <alias> -> switch (with canonicalization)
+      const resolvedProfile = resolveModelProfile(firstArg);
+      if (resolvedProfile) {
+        return { kind: "command_model_switch", profile: resolvedProfile };
+      }
+      // Invalid profile - still parse as switch, validation happens in router
+      return { kind: "command_model_switch", profile: firstArg };
+    }
+
+    // Parse other known commands (no arguments expected)
+    switch (commandWord) {
       case "ping":
         return { kind: "command_ping" };
       case "status":

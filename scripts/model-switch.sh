@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # Model switch script for pi-matrix-agent
-# Switches the default model profile for the bot
+#
+# IMPORTANT: This script changes the BOT-GLOBAL default model in settings.json.
+# It does NOT switch the model for already-active rooms.
+#
+# For room-level model switching, use the Matrix commands:
+#   !model          - Show current model status
+#   !model gemma4   - Switch to Gemma4
+#   !model qwen27   - Switch to Qwen27
+#   !m g4           - Switch to Gemma4 (alias)
+#   !m q27          - Switch to Qwen27 (alias)
+#
+# This shell script is primarily for:
+#   - Setting the default model for brand-new rooms
+#   - Setting the default model after !reset
+#   - Batch configuration changes
 #
 # Usage:
 #   ./scripts/model-switch.sh gemma4
@@ -14,6 +28,7 @@ BOT_AGENT_DIR="/root/.pi-matrix-agent/agent"
 SETTINGS_FILE="${BOT_AGENT_DIR}/settings.json"
 MODELS_FILE="${BOT_AGENT_DIR}/models.json"
 SERVICE_NAME="pi-matrix-agent"
+SESSION_BASE_DIR="/root/homelab/sessions/pi-matrix"
 
 # Profile definitions
 declare -A PROFILES
@@ -35,6 +50,16 @@ NC='\033[0m' # No Color
 if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "Usage: $0 <profile>"
     echo ""
+    echo "This script changes the BOT-GLOBAL default model in settings.json."
+    echo "It does NOT switch the model for already-active rooms."
+    echo ""
+    echo "For room-level model switching, use Matrix commands:"
+    echo "  !model          - Show current model status"
+    echo "  !model gemma4   - Switch to Gemma4"
+    echo "  !model qwen27   - Switch to Qwen27"
+    echo "  !m g4           - Switch to Gemma4 (alias)"
+    echo "  !m q27          - Switch to Qwen27 (alias)"
+    echo ""
     echo "Profiles:"
     echo "  gemma4  - Gemma4 26B A4B (on port 8081)"
     echo "  qwen27  - Qwen3.5 27B Opus (on port 8080)"
@@ -44,8 +69,10 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "  --dry-run Show what would change without applying"
     echo ""
     echo "Example:"
-    echo "  $0 gemma4     # Switch to Gemma4 and restart service"
-    echo "  $0 qwen27     # Switch to Qwen27 and restart service"
+    echo "  $0 gemma4     # Set global default to Gemma4 and restart service"
+    echo "  $0 qwen27     # Set global default to Qwen27 and restart service"
+    echo ""
+    echo "NOTE: Use !model in Matrix for per-room switching without restart."
     exit 0
 fi
 
@@ -198,6 +225,21 @@ if [[ "$NEW_PROVIDER" != "$TARGET_PROVIDER" || "$NEW_MODEL" != "$TARGET_MODEL" ]
     exit 1
 fi
 echo -e "${GREEN}✓ Settings updated and verified${NC}"
+echo ""
+
+# Clear session directory so next prompt uses new model
+echo -e "${YELLOW}Clearing session directory for new model...${NC}"
+echo "  Session files have model baked in - clearing ensures fresh session with new model"
+if [[ -d "$SESSION_BASE_DIR" ]]; then
+    # Find and count session files
+    SESSION_COUNT=$(find "$SESSION_BASE_DIR" -name "*.jsonl" 2>/dev/null | wc -l)
+    if [[ "$SESSION_COUNT" -gt 0 ]]; then
+        find "$SESSION_BASE_DIR" -name "*.jsonl" -delete 2>/dev/null
+        echo -e "  $GREEN✓ Cleared $SESSION_COUNT session file(s) from $SESSION_BASE_DIR${NC}"
+    else
+        echo -e "  $GREEN✓ No session files to clear${NC}"
+    fi
+fi
 echo ""
 
 # Restart systemd service
