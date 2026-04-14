@@ -2,28 +2,36 @@
 
 ## Quick Reference
 
-### Start (Single Instance)
+### Production (Systemd Service) - RECOMMENDED
+
 ```bash
-cd ~/homelab/pi-matrix-agent
-./scripts/run-bot.sh
+# Install service (one-time)
+sudo ./scripts/install-service.sh install
+
+# Start/stop/restart
+sudo systemctl start pi-matrix-agent
+sudo systemctl stop pi-matrix-agent
+sudo systemctl restart pi-matrix-agent
+
+# Status and logs
+sudo systemctl status pi-matrix-agent
+sudo journalctl -u pi-matrix-agent -f
+
+# Full health check
+./scripts/service-status.sh
 ```
 
-### Start with Public URL (for correct `!control` output)
-```bash
-export CONTROL_PUBLIC_URL=https://<your-node>.<tailnet>.ts.net
-cd ~/homelab/pi-matrix-agent
-./scripts/run-bot.sh
-```
+### Development (Manual)
 
-### Stop All Instances
 ```bash
-pkill -f "node dist/index.js"
-pkill -f "tsx.*src/index.ts"
-```
+# Build first
+npm run build
 
-### Check Running Instances
-```bash
-ps aux | grep -E "node.*dist/index|node.*tsx.*src/index" | grep -v grep
+# Run with public URL
+CONTROL_PUBLIC_URL=https://pi-prototype.home.macl.at.ts.net ./scripts/run-bot.sh
+
+# Or dev mode with watch
+npm run dev
 ```
 
 ---
@@ -32,146 +40,440 @@ ps aux | grep -E "node.*dist/index|node.*tsx.*src/index" | grep -v grep
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    pi-matrix-agent                           │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │ MatrixTransport │  │ ControlServer   │  │PiBackend    │ │
-│  │ (Bot)           │  │ (Web UI/API)    │  │(Sessions)   │ │
-│  └────────┬────────┘  └────────┬────────┘  └──────┬──────┘ │
-│           │                    │                   │        │
-│           └──────────┬─────────┴───────────┬───────┘        │
-│                      │                     │                │
-│              ┌───────▼───────┐   ┌────────▼──────┐         │
-│              │  Router       │   │  Express App  │         │
-│              │  (Commands)   │   │  (Routes)     │         │
-│              └───────────────┘   └───────────────┘         │
+│                    systemd                                   │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              pi-matrix-agent.service                     ││
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────┐ ││
+│  │  │ MatrixTransport │  │ ControlServer   │  │Backend │ ││
+│  │  │ (Bot)           │  │ (Web UI/API)    │  │        │ ││
+│  │  └────────┬────────┘  └────────┬────────┘  └────┬────┘ ││
+│  │           │                    │                 │     ││
+│  │           └──────────┬─────────┴───────────┬─────┘     ││
+│  │                      │                     │           ││
+│  │             ┌────────▼────────┐   ┌────────▼────┐      ││
+│  │             │  Router         │   │Express App  │      ││
+│  │             │  (Commands)     │   │  (Routes)   │      ││
+│  │             └─────────────────┘   └─────────────┘      ││
+│  └─────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
         │                           │
         ▼                           ▼
    Matrix HS                  Port 9000
    (dendrite)                (Control UI)
+                              │
+                              ▼
+                       ┌───────────┐
+                       │ Tailscale │
+                       │   Serve   │
+                       └───────────┘
+```
+
+---
+
+## Systemd Service (Production)
+
+### Installation
+
+**One-time setup:**
+
+```bash
+cd ~/homelab/pi-matrix-agent
+
+# Install service (creates unit + checks env file)
+sudo ./scripts/install-service.sh install
+
+# Review environment file (edit if needed)
+sudo nano /etc/pi-matrix-agent/env.conf
+
+# Enable and start
+sudo systemctl enable pi-matrix-agent
+sudo systemctl start pi-matrix-agent
+```
+
+### Environment File
+
+The service reads environment variables from `/etc/pi-matrix-agent/env.conf`:
+
+```bash
+# Required
+CONFIG_FILE="/root/homelab/pi-matrix-agent/config.json"
+CONTROL_PUBLIC_URL="https://pi-prototype.home.macl.at.ts.net"
+
+# Optional (have defaults)
+# CONTROL_PORT=9000
+# CONTROL_HOST=127.0.0.1
+NODE_ENV="production"
+```
+
+**Key variable: `CONTROL_PUBLIC_URL`**
+
+This must be set for `!control` to return the correct public URL:
+
+```bash
+# Format: https://<node-name>.<tailnet>.ts.net
+CONTROL_PUBLIC_URL="https://pi-prototype.home.macl.at.ts.net"
+```
+
+### Service Management
+
+```bash
+# Start
+sudo systemctl start pi-matrix-agent
+
+# Stop
+sudo systemctl stop pi-matrix-agent
+
+# Restart (after config change or new build)
+sudo systemctl restart pi-matrix-agent
+
+# Status
+sudo systemctl status pi-matrix-agent
+
+# Logs (follow)
+sudo journalctl -u pi-matrix-agent -f
+
+# Logs (last 50 lines)
+sudo journalctl -u pi-matrix-agent -n 50
+
+# Logs (since boot)
+sudo journalctl -u pi-matrix-agent -b
+```
+
+### Update After New Build
+
+```bash
+# 1. Build the new version
+cd ~/homelab/pi-matrix-agent
+npm run build
+
+# 2. Restart the service
+sudo systemctl restart pi-matrix-agent
+
+# 3. Verify
+./scripts/service-status.sh
+```
+
+### Uninstall
+
+```bash
+sudo ./scripts/install-service.sh uninstall
+```
+
+---
+
+## Development Mode
+
+### Warning: Do Not Run Dev Mode Alongside Service!
+
+```bash
+# ❌ WRONG - Running both creates duplicate processes:
+sudo systemctl start pi-matrix-agent  # Service running
+npm run dev                           # Dev also running → DUPLICATES!
+```
+
+**Always stop the service before running dev mode:**
+
+```bash
+# ✅ CORRECT - Stop service first:
+sudo systemctl stop pi-matrix-agent
+npm run dev  # Now safe to run dev
+```
+
+### Development Commands
+
+```bash
+# Watch mode (auto-reload on changes)
+npm run dev
+
+# Single run with public URL
+CONTROL_PUBLIC_URL=https://pi-prototype.home.macl.at.ts.net ./scripts/run-bot.sh
+
+# Direct node run (not recommended)
+CONTROL_PUBLIC_URL=https://pi-prototype.home.macl.at.ts.net node dist/index.js
+```
+
+---
+
+## Health Checks & Diagnostics
+
+### Full Status Check
+
+```bash
+./scripts/service-status.sh
+```
+
+This checks:
+- Systemd service status
+- Running process count (should be exactly 1)
+- Environment variables (especially CONTROL_PUBLIC_URL)
+- Network listeners
+- Tailscale Serve status
+
+### Check Single Process
+
+```bash
+npm run check:single-process
+# or
+./scripts/check-single-process.sh
+```
+
+### Manual Process Check
+
+```bash
+# Count processes
+ps aux | grep "node dist/index.js" | grep -v grep | wc -l
+# Should output: 1
+
+# See process details
+ps aux | grep "node dist/index.js" | grep -v grep
+
+# Check parent (should be PID 1 if systemd-managed)
+pgrep -f "node dist/index.js" | xargs -I{} sh -c 'echo PID {}: $(ps -o ppid= -p {})'
+```
+
+### Check Environment
+
+```bash
+# Check env file
+cat /etc/pi-matrix-agent/env.conf
+
+# Check running process environment
+PID=$(pgrep -f "node dist/index.js")
+cat /proc/$PID/environ | tr '\0' '\n' | grep CONTROL
 ```
 
 ---
 
 ## Common Issues
 
-### Duplicate Bot Responses
+### Issue: `!control` Returns Localhost URLs
 
-**Symptom:** `!control` returns multiple responses with mixed old/new formats.
+**Symptom:**
+```
+!control
+Assistant UI: http://localhost:9000/spike?room=...
+```
 
-**Cause:** Multiple bot processes running simultaneously.
+**Cause:** `CONTROL_PUBLIC_URL` not set at process startup.
 
 **Diagnosis:**
 ```bash
-ps aux | grep -E "node.*dist/index|node.*tsx.*src/index" | grep -v grep
+./scripts/service-status.sh control-url
 ```
 
 **Fix:**
 ```bash
-# Stop all instances
-pkill -f "node dist/index.js"
-pkill -f "tsx.*src/index.ts"
+# 1. Update env file
+sudo nano /etc/pi-matrix-agent/env.conf
+# Set: CONTROL_PUBLIC_URL="https://pi-prototype.home.macl.at.ts.net"
 
-# Start single instance
-export CONTROL_PUBLIC_URL=https://<your-node>.<tailnet>.ts.net
-cd ~/homelab/pi-matrix-agent
-./scripts/run-bot.sh
+# 2. Restart service
+sudo systemctl restart pi-matrix-agent
+
+# 3. Verify
+./scripts/service-status.sh control-url
 ```
 
-### `!control` Shows Localhost URLs
+---
 
-**Symptom:** `!control` returns `http://localhost:9000/...` instead of public URL.
+### Issue: Multiple Bot Responses (Duplicate Processes)
 
-**Cause:** `CONTROL_PUBLIC_URL` not set at startup.
+**Symptom:** `!ping` returns multiple "pong" responses.
+
+**Diagnosis:**
+```bash
+ps aux | grep "node dist/index.js" | grep -v grep
+# Shows multiple processes
+```
 
 **Fix:**
 ```bash
-export CONTROL_PUBLIC_URL=https://<your-node>.<tailnet>.ts.net
+# Kill all manual processes
 pkill -f "node dist/index.js"
-./scripts/run-bot.sh
+
+# Restart via systemd (single canonical process)
+sudo systemctl restart pi-matrix-agent
+
+# Verify single process
+./scripts/check-single-process.sh
+```
+
+**Prevention:** Always use systemd for production. Never run manual processes alongside the service.
+
+---
+
+### Issue: Service Won't Start
+
+**Diagnosis:**
+```bash
+# Check status
+sudo systemctl status pi-matrix-agent
+
+# Check logs
+sudo journalctl -u pi-matrix-agent -n 50
+```
+
+**Common causes:**
+1. Config file not found - check `CONFIG_FILE` in env.conf
+2. Port 9000 already in use - another process running
+3. Missing dependencies - run `npm install`
+
+**Fixes:**
+```bash
+# If port in use - kill old process
+sudo lsof -i :9000
+pkill -f "node dist/index.js"
+
+# Restart service
+sudo systemctl restart pi-matrix-agent
+```
+
+---
+
+### Issue: Web UI Not Accessible via Tailscale
+
+**Diagnosis:**
+```bash
+# Check control server locally
+curl http://127.0.0.1:9000/
+
+# Check Tailscale Serve
+sudo tailscale serve status
+```
+
+**Fix:**
+```bash
+# Restart Tailscale Serve
+sudo ./scripts/setup-serve.sh 9000 127.0.0.1
 ```
 
 ---
 
 ## Command Reference
 
+### Bot Commands (in Matrix)
+
 | Command | Description |
 |---------|-------------|
 | `!ping` | Check if bot is alive |
 | `!status` | Show bot status |
-| `!help` | Show command help |
+| `!help` | Show available commands |
 | `!reset` | Clear conversation memory |
-| `!control` | Get control URL for this room |
+| `!control` | Get WebUI URL for current room |
+
+### Systemd Commands
+
+| Command | Description |
+|---------|-------------|
+| `systemctl start pi-matrix-agent` | Start service |
+| `systemctl stop pi-matrix-agent` | Stop service |
+| `systemctl restart pi-matrix-agent` | Restart service |
+| `systemctl status pi-matrix-agent` | Show status |
+| `systemctl enable pi-matrix-agent` | Enable on boot |
+| `journalctl -u pi-matrix-agent -f` | Follow logs |
 
 ---
 
 ## Web UI Access
 
-### Assistant UI (New)
+### Assistant UI (Primary)
 ```
-https://<your-node>.<tailnet>.ts.net/spike?room=<roomKey>
+https://pi-prototype.home.macl.at.ts.net/spike?room=<roomKey>
 ```
 
 ### Original Room View (Fallback)
 ```
-https://<your-node>.<tailnet>.ts.net/room/<roomKey>
+https://pi-prototype.home.macl.at.ts.net/room/<roomKey>
 ```
 
 ---
 
-## Tailscale Serve Setup
+## Tailscale Serve
+
+Tailscale Serve is separate infrastructure that exposes the control server.
 
 ```bash
-./scripts/setup-serve.sh 9000 127.0.0.1
+# Setup (one-time)
+sudo ./scripts/setup-serve.sh 9000 127.0.0.1
+
+# Check status
+sudo tailscale serve status
+
+# Restart
+sudo ./scripts/setup-serve.sh 9000 127.0.0.1
 ```
+
+**Note:** The bot service does NOT manage Tailscale Serve. They are independent.
 
 ---
 
-## Process Management
+## Operational Checklist
 
-### Production Mode (Recommended)
-```bash
-# Build first
-npm run build
+### After Installing Service
 
-# Run with canonical script
-./scripts/run-bot.sh
-```
-
-### Development Mode
-```bash
-# Auto-reload on changes
-npm run dev
-```
-
-### Background Execution
-```bash
-# Run in background with logging
-nohup ./scripts/run-bot.sh > /tmp/pi-matrix-agent.log 2>&1 &
-```
-
----
-
-## Verification Checklist
-
-After restart:
-
-1. **Single process running:**
+1. **Service is active:**
    ```bash
-   ps aux | grep "node dist/index.js" | wc -l  # Should be 1
+   sudo systemctl status pi-matrix-agent
+   # Should show "active (running)"
    ```
 
-2. **Control server listening:**
+2. **Single process:**
    ```bash
-   ss -tlnp | grep 9000  # Should show one LISTEN on 127.0.0.1:9000
+   ./scripts/check-single-process.sh
+   # Should show "✓ Exactly one process running"
    ```
 
-3. **Matrix connected:**
-   - Check logs for "Matrix bot started"
-   - Send `!ping` in Matrix, should get single "pong" response
+3. **Control URL configured:**
+   ```bash
+   ./scripts/service-status.sh control-url
+   # Should show public URL, not localhost
+   ```
 
-4. **No duplicate responses:**
-   - Send `!control` in Matrix
-   - Should get exactly ONE response
-   - Format: `Assistant UI: https://.../spike?room=<roomKey>`
+4. **Bot responds:**
+   - Send `!ping` in Matrix → get single "pong"
+
+5. **!control returns public URL:**
+   - Send `!control` in Matrix → get `https://pi-prototype.home.macl.at.ts.net/spike?room=...`
+
+---
+
+## File Locations
+
+| File | Path |
+|------|------|
+| Service unit | `/etc/systemd/system/pi-matrix-agent.service` |
+| Environment | `/etc/pi-matrix-agent/env.conf` |
+| Source code | `/root/homelab/pi-matrix-agent/` |
+| Built binary | `/root/homelab/pi-matrix-agent/dist/index.js` |
+| Config | `/root/homelab/pi-matrix-agent/config.json` |
+| Sessions | `/root/homelab/sessions/pi-matrix/` |
+| Agent dir | `/root/.pi-matrix-agent/agent/` |
+
+---
+
+## Logs
+
+### Real-time logs
+```bash
+sudo journalctl -u pi-matrix-agent -f
+```
+
+### Last 100 lines
+```bash
+sudo journalctl -u pi-matrix-agent -n 100
+```
+
+### Since boot
+```bash
+sudo journalctl -u pi-matrix-agent -b
+```
+
+### Specific time range
+```bash
+sudo journalctl -u pi-matrix-agent --since "2026-04-14 10:00:00" --until "2026-04-14 12:00:00"
+```
+
+### Export logs
+```bash
+sudo journalctl -u pi-matrix-agent -b > /tmp/pi-matrix-agent-logs.txt
+```

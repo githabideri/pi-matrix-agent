@@ -8,7 +8,8 @@ echo "=== check-single-process.sh ==="
 echo "Checking for duplicate pi-matrix-agent processes..."
 
 # Count matching processes (excluding grep and bash wrappers)
-PROCESS_COUNT=$(ps aux | grep "node dist/index.js" | grep -v grep | grep -v "bash -c" | wc -l)
+# Matches both: node dist/index.js and /usr/bin/node .../dist/index.js
+PROCESS_COUNT=$(ps aux | grep "dist/index.js" | grep -v grep | grep -v "bash -c" | wc -l)
 
 echo "Found $PROCESS_COUNT matching process(es)"
 
@@ -22,7 +23,7 @@ if [ "$PROCESS_COUNT" -eq 1 ]; then
     echo "✓ Exactly one process running (CORRECT)"
     echo ""
     echo "Process details:"
-    ps aux | grep "node dist/index.js" | grep -v grep | grep -v "bash -c"
+    ps aux | grep "dist/index.js" | grep -v grep
     exit 0
 fi
 
@@ -37,10 +38,10 @@ if [ "$PROCESS_COUNT" -gt 1 ]; then
     echo "  - Unpredictable behavior"
     echo ""
     echo "Offending processes:"
-    ps aux | grep "node dist/index.js" | grep -v grep | grep -v "bash -c"
+    ps aux | grep "dist/index.js" | grep -v grep
     echo ""
     echo "To fix:"
-    echo "  1. Kill extra processes: pkill -f 'node dist/index.js'"
+    echo "  1. Kill extra processes: pkill -f 'dist/index.js'"
     echo "  2. Restart via proper entrypoint (systemd or managed script)"
     echo ""
     exit 1

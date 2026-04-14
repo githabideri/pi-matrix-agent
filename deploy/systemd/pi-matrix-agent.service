@@ -1,0 +1,56 @@
+#!/usr/lib/systemd/system
+#
+# pi-matrix-agent.service
+# Systemd service unit for pi-matrix-agent Matrix bot
+#
+# This service runs the built production binary (dist/index.js), not dev/watch mode.
+# Environment variables are loaded from /etc/pi-matrix-agent/env.conf
+#
+# Installation:
+#   sudo cp deploy/systemd/pi-matrix-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable pi-matrix-agent
+#   sudo systemctl start pi-matrix-agent
+#
+
+[Unit]
+Description=pi-matrix-agent - Matrix bot with control plane
+Documentation=https://github.com/mariozechner/pi-matrix-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Working directory
+WorkingDirectory=/root/homelab/pi-matrix-agent
+
+# Environment file - contains runtime configuration
+# See env.conf.example for required variables
+EnvironmentFile=-/etc/pi-matrix-agent/env.conf
+
+# Execute the built production binary
+ExecStart=/usr/bin/node /root/homelab/pi-matrix-agent/dist/index.js
+
+# Restart policy - auto-restart on failure
+Restart=on-failure
+RestartSec=5s
+
+# Resource limits (optional - adjust as needed)
+# MemoryLimit=2G
+# CPUQuota=50%
+
+# Security hardening (optional but recommended)
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/root/homelab/sessions /root/.pi-matrix-agent /root/homelab/pi-matrix-agent/storage
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pi-matrix-agent
+
+[Install]
+WantedBy=multi-user.target

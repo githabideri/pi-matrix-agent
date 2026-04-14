@@ -202,7 +202,23 @@ Key fields:
 
 ### Running
 
-**Recommended: Use the canonical startup script**
+**Production: Use systemd service (recommended)**
+
+For production deployment, install the systemd service:
+
+```bash
+# One-time installation
+sudo ./scripts/install-service.sh install
+
+# Edit environment file if needed
+sudo nano /etc/pi-matrix-agent/env.conf
+
+# Start and enable on boot
+sudo systemctl enable pi-matrix-agent
+sudo systemctl start pi-matrix-agent
+```
+
+**Development: Use the startup script**
 
 ```bash
 # Start with CONTROL_PUBLIC_URL set (recommended)
@@ -212,12 +228,12 @@ CONTROL_PUBLIC_URL=https://your-tailscale-serve-url ./scripts/run-bot.sh
 ./scripts/run-bot.sh
 ```
 
-**Alternative: Direct startup**
+**⚠️ Warning:** Do not run dev mode (`npm run dev`) or manual processes alongside the systemd service. This creates duplicate processes and causes unpredictable behavior. Always stop the service first:
 
 ```bash
-CONTROL_PUBLIC_URL=https://your-tailscale-serve-url \
-  CONFIG_FILE=./config.json \
-  node dist/index.js
+# Stop service before running dev
+sudo systemctl stop pi-matrix-agent
+npm run dev  # Now safe
 ```
 
 ### Tailscale Serve (Optional)
@@ -365,12 +381,18 @@ pi-matrix-agent/
 │   └── css/
 │       └── style.css
 ├── scripts/
-│   ├── run-bot.sh              # Canonical startup script
+│   ├── run-bot.sh              # Manual startup script
+│   ├── install-service.sh      # Install systemd service
+│   ├── service-status.sh       # Health check script
 │   ├── check-runtime.sh        # Runtime diagnostics
 │   ├── smoke-local.sh
 │   ├── smoke-control.sh
 │   ├── smoke-matrix.sh
 │   └── check-single-process.sh
+├── deploy/
+│   └── systemd/
+│       ├── pi-matrix-agent.service  # Systemd unit file
+│       └── env.conf.example         # Environment template
 ├── test/
 │   └── unit/
 │       └── pi-backend.test.ts
@@ -380,6 +402,8 @@ pi-matrix-agent/
 
 ### Scripts
 
+**Development:**
+
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Watch mode development |
@@ -387,21 +411,65 @@ pi-matrix-agent/
 | `npm run build` | Compile to JavaScript |
 | `npm test` | Run unit tests |
 | `npm run verify` | Full verification (test + check + build) |
-| `./scripts/run-bot.sh` | **Canonical startup script** |
+| `./scripts/run-bot.sh` | Manual startup script (development) |
 | `./scripts/check-runtime.sh` | Runtime diagnostics |
 | `npm run smoke:local` | Local smoke test |
 | `npm run smoke:control` | Control API smoke test |
 | `npm run smoke:matrix` | Matrix smoke test |
 | `npm run check:single-process` | Check for duplicate processes |
 
+**Production (Systemd):**
+
+| Script | Description |
+|--------|-------------|
+| `sudo ./scripts/install-service.sh` | Install/update systemd service |
+| `./scripts/service-status.sh` | Full health check |
+| `systemctl status pi-matrix-agent` | Service status |
+| `journalctl -u pi-matrix-agent -f` | Follow logs |
+
 ## Deployment
 
+### Production Deployment (Systemd)
+
+**Install the service:**
+
+```bash
+# One-time installation
+sudo ./scripts/install-service.sh install
+
+# Review/edit environment file
+sudo nano /etc/pi-matrix-agent/env.conf
+
+# Enable and start
+sudo systemctl enable pi-matrix-agent
+sudo systemctl start pi-matrix-agent
+```
+
+**Key files:**
+- Service unit: `/etc/systemd/system/pi-matrix-agent.service`
+- Environment: `/etc/pi-matrix-agent/env.conf`
+- Logs: `journalctl -u pi-matrix-agent`
+
+**Update after new build:**
+
+```bash
+npm run build
+sudo systemctl restart pi-matrix-agent
+```
+
+**Status and diagnostics:**
+
+```bash
+./scripts/service-status.sh    # Full health check
+systemctl status pi-matrix-agent
+journalctl -u pi-matrix-agent -f
+```
+
 See [OPERATIONS.md](OPERATIONS.md) for:
-- Development workflow
-- Deployment workflow
-- Tailscale workflow
+- Complete operational guide
 - Troubleshooting guide
-- Verification ladder
+- Environment configuration
+- Common issues and fixes
 
 ## Matrix API Integration
 
@@ -425,10 +493,11 @@ curl -X POST "$MATRIX_HOMESERVER/_matrix/client/r0/rooms/$MATRIX_ROOM_ID/send/m.
 ### Key Points
 
 - **Source of truth**: `pi-matrix-agent/` directory (source tree)
-- **Deployment config**: Separate services directory (not in repo)
+- **Production runner**: systemd service (`pi-matrix-agent.service`)
 - **Single process**: Only one bot process should run at a time
 - **Control server**: Binds to `127.0.0.1` (localhost only)
-- **Tailscale Serve**: For secure tailnet access
+- **Tailscale Serve**: For secure tailnet access (separate infrastructure)
+- **Environment**: `/etc/pi-matrix-agent/env.conf` (set `CONTROL_PUBLIC_URL` here)
 
 ## Troubleshooting
 
@@ -457,15 +526,24 @@ curl -s http://127.0.0.1:9000/
 
 ### Duplicate Processes
 
+**Prevention:** Always use systemd for production. Never run manual processes alongside the service.
+
 ```bash
 # Check for duplicates
 npm run check:single-process
 
-# Kill all old processes
+# Kill all manual processes (not recommended - use systemd)
 pkill -f "node dist/index.js"
 
-# Restart cleanly using the canonical startup script
-CONTROL_PUBLIC_URL=... ./scripts/run-bot.sh
+# Restart via systemd (canonical approach)
+sudo systemctl restart pi-matrix-agent
+```
+
+**Development warning:** Stop the service before running `npm run dev`:
+
+```bash
+sudo systemctl stop pi-matrix-agent  # Stop service first
+npm run dev                          # Now safe to run dev
 ```
 
 ### WebUI Not Accessible
@@ -485,13 +563,33 @@ tailscale status
 
 If `!control` returns `http://localhost:9000/room/...` instead of your Tailscale URL:
 
-```bash
-# Check if CONTROL_PUBLIC_URL is set
-env | grep CONTROL_PUBLIC_URL
+**Diagnosis:**
 
-# Restart bot with CONTROL_PUBLIC_URL set
+```bash
+./scripts/service-status.sh control-url
+```
+
+**Fix (systemd service):**
+
+```bash
+# 1. Update environment file
+sudo nano /etc/pi-matrix-agent/env.conf
+# Set: CONTROL_PUBLIC_URL="https://your-node.your-tailnet.ts.net"
+
+# 2. Restart service
+sudo systemctl restart pi-matrix-agent
+
+# 3. Verify
+./scripts/service-status.sh control-url
+```
+
+**Fix (development):**
+
+```bash
 CONTROL_PUBLIC_URL=https://your-node.your-tailnet.ts.net ./scripts/run-bot.sh
 ```
+
+**Important:** `CONTROL_PUBLIC_URL` must be set **at process startup** - setting it later won't affect an already-running bot.
 
 **Important**: `CONTROL_PUBLIC_URL` must be set **at process startup** - setting it later won't affect an already-running bot.
 

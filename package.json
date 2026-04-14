@@ -21,6 +21,9 @@
     "smoke:ui": "bash ./scripts/ensure-ui-test-room.sh && playwright test tests/ui",
     "smoke:full-loop": "playwright test tests/integration/full-loop",
     "check:single-process": "bash ./scripts/check-single-process.sh",
+    "service:install": "bash ./scripts/install-service.sh install",
+    "service:update": "bash ./scripts/install-service.sh update",
+    "service:status": "bash ./scripts/service-status.sh",
     "prepare": "husky"
   },
   "dependencies": {
