@@ -117,4 +117,21 @@ describe("parseCommand", () => {
   it("treats !m --status as command_model_status", () => {
     expect(parseCommand("!m --status")).toEqual({ kind: "command_model_status" });
   });
+
+  // Phase 2: Clear command tests
+  it("parses !model --clear as command_model_clear", () => {
+    expect(parseCommand("!model --clear")).toEqual({ kind: "command_model_clear" });
+  });
+
+  it("parses !m --clear as command_model_clear", () => {
+    expect(parseCommand("!m --clear")).toEqual({ kind: "command_model_clear" });
+  });
+
+  it("parses !m -c as command_model_clear", () => {
+    expect(parseCommand("!m -c")).toEqual({ kind: "command_model_clear" });
+  });
+
+  it("parses !m -s as command_model_status", () => {
+    expect(parseCommand("!m -s")).toEqual({ kind: "command_model_status" });
+  });
 });

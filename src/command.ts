@@ -55,9 +55,14 @@ export function parseCommand(body: string): ParsedCommand {
         return { kind: "command_model_status" };
       }
 
-      // !model --status or !m --status -> status
-      if (firstArg === "--status") {
+      // !model --status, !m --status, !m -s -> status
+      if (firstArg === "--status" || firstArg === "-s") {
         return { kind: "command_model_status" };
+      }
+
+      // !model --clear, !m --clear, !m -c -> clear room override
+      if (firstArg === "--clear" || firstArg === "-c") {
+        return { kind: "command_model_clear" };
       }
 
       // !model <profile> or !m <alias> -> switch (with canonicalization)

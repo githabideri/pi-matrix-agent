@@ -14,6 +14,7 @@ export type ParsedCommand =
   | { kind: "command_control" }
   | { kind: "command_model_status" }
   | { kind: "command_model_switch"; profile: string }
+  | { kind: "command_model_clear" }
   | { kind: "chat_prompt"; prompt: string };
 
 export interface AgentBackend {
@@ -27,6 +28,12 @@ export interface ModelStatus {
   sessionId?: string;
   sessionFile?: string;
   isProcessing?: boolean;
+
+  // Phase 2: Per-room desired model state
+  desiredModel?: string;
+  desiredResolvedModelId?: string;
+  globalDefault?: string;
+  modelMismatch?: boolean;
 }
 
 export interface ModelSwitchResult {
@@ -35,6 +42,23 @@ export interface ModelSwitchResult {
   requestedProfile: string;
   resolvedModel?: string;
   activeModel?: string;
+}
+
+export interface ModelClearResult {
+  success: boolean;
+  message: string;
+  previousDesiredModel?: string;
+}
+
+// Phase 2: Per-room desired model state types
+export interface RoomModelState {
+  desiredModel: string; // Profile name (e.g., "qwen27", "gemma4")
+  resolvedModelId?: string; // Resolved model ID
+  updatedAt: string; // ISO timestamp
+}
+
+export interface RoomModelsStore {
+  rooms: Record<string, RoomModelState>;
 }
 
 export interface ChatMessage {

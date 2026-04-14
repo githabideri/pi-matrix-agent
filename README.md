@@ -291,24 +291,32 @@ npm run check:single-process
 | `!reset` | Clear conversation memory (archives old session) |
 | `!control` | Get WebUI URL for current room |
 
-### Model Switching
+### Model Switching (Phase 2 - Room-Persistent)
 
 | Command | Description |
 |---------|-------------|
 | `!model` | Show current model status |
 | `!model --status` | Show current model status |
+| `!model --clear` | Clear room override (fall back to global) |
 | `!model gemma4` | Switch to Gemma4 model |
 | `!model qwen27` | Switch to Qwen27 model |
+| `!m -s` | Show status (short alias) |
+| `!m -c` | Clear room override (short alias) |
 | `!m g4` | Switch to Gemma4 (alias) |
 | `!m q27` | Switch to Qwen27 (alias) |
 
-**Important:** Model switching is a **first-pass operational feature** with limitations:
+**Phase 2 Features:**
 - ✅ Live-room switch works without restart
 - ✅ No session wipe needed
-- ⚠️ SDK side effect: Updates bot-global default for new rooms and `!reset`
-- ⚠️ Same-room resume falls back to global default
+- ✅ Room-persistent: Survives service restart
+- ✅ Survives `!reset`: Desired model is reapplied
+- ✅ Does not contaminate global default for other rooms
+- ✅ Drift detection: Status shows when active differs from desired
+- ✅ Clear override: `!model --clear` removes room override
 
-See [docs/MODEL_SWITCH.md](docs/MODEL_SWITCH.md) for full documentation.
+**Documentation:**
+- [docs/MODEL_SWITCH.md](docs/MODEL_SWITCH.md) - Complete feature documentation
+- [docs/MODEL_SWITCH_PHASE2.md](docs/MODEL_SWITCH_PHASE2.md) - Phase 2 architecture
 
 **Shell script alternative:** `./scripts/model-switch.sh gemma4` changes the global default and restarts the service. Use this for batch configuration, not live-room control.
 

@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
+import { RoomModelManager } from "./room-model-manager.js";
 import { type LiveRoomState, RoomStateManager } from "./room-state.js";
-import type { ModelStatus, ModelSwitchResult } from "./types.js";
+import type { ModelClearResult, ModelStatus, ModelSwitchResult } from "./types.js";
 
 export interface PiSessionBackendOptions {
   sessionBaseDir: string;
@@ -15,12 +16,14 @@ export class PiSessionBackend {
   private cwd: string;
   private agentDir: string;
   private roomStateManager: RoomStateManager;
+  private roomModelManager: RoomModelManager;
 
   constructor(options: PiSessionBackendOptions) {
     this.sessionBaseDir = options.sessionBaseDir;
     this.cwd = options.cwd ?? process.cwd();
     this.agentDir = options.agentDir;
     this.roomStateManager = new RoomStateManager();
+    this.roomModelManager = new RoomModelManager(this.agentDir);
 
     console.log(`[PiSessionBackend] Using dedicated agentDir: ${this.agentDir}`);
 
@@ -94,6 +97,9 @@ export class PiSessionBackend {
     // Update snapshot with model info (safe, non-blocking)
     this.updateSnapshotFromSession(roomState, session);
 
+    // Phase 2: Apply desired room model if it differs from active model
+    this.applyDesiredRoomModelIfDifferent(roomId, session);
+
     return session;
   }
 
@@ -137,6 +143,56 @@ export class PiSessionBackend {
       });
     } catch {
       // Silently ignore - snapshot will use stale/default values
+    }
+  }
+
+  /**
+   * Phase 2: Apply desired room model if it differs from active model.
+   * This is called after session creation/resume and after !reset.
+   */
+  private async applyDesiredRoomModelIfDifferent(roomId: string, session: any): Promise<void> {
+    const desiredModelProfile = this.roomModelManager.resolveDesiredModel(roomId);
+
+    if (!desiredModelProfile) {
+      return; // No desired model to apply
+    }
+
+    // Get current active model
+    const activeModel = session.model?.id || session.model?.name;
+
+    // Find the target model for the desired profile
+    const targetModel = this.findModelByProfile(desiredModelProfile);
+    if (!targetModel) {
+      console.warn(`[PiSessionBackend] Desired model profile "${desiredModelProfile}" not found for room ${roomId}`);
+      return;
+    }
+
+    // Check if auth is configured
+    const modelRegistry = session.modelRegistry;
+    if (!modelRegistry.hasConfiguredAuth(targetModel)) {
+      console.warn(`[PiSessionBackend] No auth configured for desired model ${targetModel.provider} in room ${roomId}`);
+      return;
+    }
+
+    // Check if active model already matches desired
+    if (activeModel === targetModel.id) {
+      return; // Already on desired model
+    }
+
+    // Apply desired model
+    console.log(`[PiSessionBackend] Applying desired model "${desiredModelProfile}" to room ${roomId}`);
+    try {
+      await session.setModel(targetModel);
+
+      // Update snapshot
+      const roomState = this.roomStateManager.get(roomId);
+      if (roomState) {
+        this.updateSnapshotFromSession(roomState, session);
+      }
+
+      console.log(`[PiSessionBackend] Applied desired model to room ${roomId}`);
+    } catch (error: any) {
+      console.error(`[PiSessionBackend] Error applying desired model for room ${roomId}:`, error);
     }
   }
 
@@ -304,7 +360,10 @@ export class PiSessionBackend {
       console.log(`[PiSessionBackend] Created new session for room ${roomId}: ${session.sessionFile}`);
 
       // Step 8: Store new session in room state manager
-      this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
+      const _newRoomState = this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
+
+      // Phase 2: Apply desired room model if it differs from active model
+      this.applyDesiredRoomModelIfDifferent(roomId, session);
 
       console.log(`[PiSessionBackend] Reset complete for room ${roomId}`);
     } catch (error) {
@@ -627,6 +686,8 @@ export class PiSessionBackend {
   /**
    * Get model status for a room.
    * Reports the ACTIVE runtime model from the session/snapshot, not from settings.json.
+   *
+   * PHASE 2: Also reports desired model, global default, and mismatch status.
    */
   async getModelStatus(roomId: string): Promise<ModelStatus | null> {
     const roomState = this.roomStateManager.get(roomId);
@@ -652,6 +713,16 @@ export class PiSessionBackend {
       thinkingLevel = roomState.snapshot?.thinkingLevel;
     }
 
+    // Phase 2: Get desired model info
+    const desiredModelState = this.roomModelManager.getDesiredModel(roomId);
+    const globalDefault = this.roomModelManager.getGlobalDefault();
+
+    // Determine if active model mismatches desired
+    let modelMismatch = false;
+    if (desiredModelState?.resolvedModelId && model) {
+      modelMismatch = model !== desiredModelState.resolvedModelId;
+    }
+
     return {
       active: true,
       model,
@@ -659,27 +730,26 @@ export class PiSessionBackend {
       sessionId: roomState.sessionId,
       sessionFile: roomState.sessionFile,
       isProcessing: roomState.isProcessing,
+      // Phase 2 additions
+      desiredModel: desiredModelState?.desiredModel,
+      desiredResolvedModelId: desiredModelState?.resolvedModelId,
+      globalDefault,
+      modelMismatch,
     };
   }
 
   /**
    * Switch model for a room.
-   * Uses SDK session.setModel() API.
+   * Uses SDK session.setModel() API and persists desired model per room.
    *
-   * BEHAVIOR (first-pass operational feature):
+   * PHASE 2 BEHAVIOR:
    * - Live-room switch: Works correctly. The active room's model changes immediately.
    * - No restart needed: The bot continues running without interruption.
    * - No session wipe needed: Existing conversation history is preserved.
-   *
-   * LIMITATIONS (documented, acceptable for first pass):
-   * - SDK side effect: setModel() updates the bot-global default in settings.json.
-   * - New rooms: Will use the switched model as their default (global side effect).
-   * - Same-room resume: Falls back to global default, NOT the switched model.
-   * - !reset: New session uses global default, NOT the previously switched model.
-   *
-   * This is a pragmatic operator feature for live-room control.
-   * It is NOT a true room-persistent model-control solution.
-   * For genuine room-scoped model persistence, room-level desired model state is needed.
+   * - Room-persistent: Desired model is stored in room-models.json.
+   * - Survives restart: New/resumed sessions will re-apply desired model.
+   * - Survives !reset: New session after reset will use desired model.
+   * - Does not contaminate global default: Room override is independent of settings.json.
    */
   async switchModel(roomId: string, requestedProfile: string): Promise<ModelSwitchResult> {
     const roomState = this.roomStateManager.get(roomId);
@@ -719,11 +789,17 @@ export class PiSessionBackend {
     }
 
     try {
+      // Get current active model for status message
+      const previousActiveModel = session.model?.id || session.model?.name || "previous";
+
       // Call SDK setModel - this updates:
       // 1. session.agent.state.model (runtime)
       // 2. session file (appends model_change entry)
-      // 3. settings.json (global default - SIDE EFFECT)
+      // 3. settings.json (global default - SIDE EFFECT, but we track per-room desired model)
       await session.setModel(targetModel);
+
+      // Phase 2: Persist desired model per room (independent of global default)
+      this.roomModelManager.setDesiredModel(roomId, requestedProfile, targetModel.id);
 
       // Update snapshot immediately
       this.updateSnapshotFromSession(roomState, session);
@@ -731,9 +807,13 @@ export class PiSessionBackend {
       // Verify the switch by reading back the active model
       const activeModel = session.model?.id || session.model?.name || "unknown";
 
+      console.log(
+        `[PiSessionBackend] Model switched for room ${roomId}: ${previousActiveModel} -> ${activeModel} (desired: ${requestedProfile})`,
+      );
+
       return {
         success: true,
-        message: `Model switched from "${session.model?.id || "previous"}" to "${activeModel}"`,
+        message: `Model switched from "${previousActiveModel}" to "${activeModel}"`,
         requestedProfile,
         resolvedModel: targetModel.id,
         activeModel,
@@ -744,6 +824,28 @@ export class PiSessionBackend {
         success: false,
         message: `Failed to switch model: ${error.message}`,
         requestedProfile,
+      };
+    }
+  }
+
+  /**
+   * Clear the desired model override for a room.
+   * After clearing, the room will fall back to the global default.
+   */
+  async clearDesiredModel(roomId: string): Promise<ModelClearResult> {
+    const previous = this.roomModelManager.clearDesiredModel(roomId);
+
+    if (previous) {
+      console.log(`[PiSessionBackend] Cleared desired model for room ${roomId}: ${previous.desiredModel}`);
+      return {
+        success: true,
+        message: `Desired model cleared for this room. Will now use the global default model.`,
+        previousDesiredModel: previous.desiredModel,
+      };
+    } else {
+      return {
+        success: true,
+        message: `No room-specific desired model was set. Already using global default.`,
       };
     }
   }

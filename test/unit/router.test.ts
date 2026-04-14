@@ -499,3 +499,229 @@ describe("routeMessage model commands", () => {
     expect(replies[0]).toContain("qwen27");
   });
 });
+
+// Phase 2: Clear command router tests
+describe("routeMessage model clear command", () => {
+  it("clears desired model for !model --clear command", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async clearDesiredModel(_roomId) {
+        return {
+          success: true,
+          message: "Desired model cleared",
+          previousDesiredModel: "qwen27",
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!model --clear",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("✓");
+    expect(replies[0].toLowerCase()).toContain("cleared");
+    expect(replies[0]).toContain("qwen27");
+  });
+
+  it("clears desired model for !m -c command (alias)", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async clearDesiredModel(_roomId) {
+        return {
+          success: true,
+          message: "No room-specific desired model was set",
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!m -c",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("✓");
+    expect(replies[0].toLowerCase()).toContain("cleared");
+  });
+
+  it("help text includes --clear command", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const agent: AgentBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!help",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent,
+        sink,
+      },
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("--clear");
+    expect(replies[0]).toContain("-c");
+  });
+});
+
+// Phase 2: Status with desired model info
+describe("routeMessage model status with Phase 2 info", () => {
+  it("status reply includes desired model info", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async getModelStatus(_roomId) {
+        return {
+          active: true,
+          model: "test-model-gemma",
+          thinkingLevel: "high",
+          sessionId: "test-session-id",
+          sessionFile: "/path/to/session.jsonl",
+          desiredModel: "gemma4",
+          desiredResolvedModelId: "test-model-gemma",
+          globalDefault: "qwen27",
+          modelMismatch: false,
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!model --status",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("test-model-gemma");
+    expect(replies[0]).toContain("gemma4");
+    expect(replies[0]).toContain("qwen27");
+  });
+
+  it("status reply shows mismatch warning when active differs from desired", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async getModelStatus(_roomId) {
+        return {
+          active: true,
+          model: "test-model-qwen", // Active is qwen
+          thinkingLevel: "high",
+          sessionId: "test-session-id",
+          sessionFile: "/path/to/session.jsonl",
+          desiredModel: "gemma4", // Desired is gemma
+          desiredResolvedModelId: "test-model-gemma",
+          globalDefault: "qwen27",
+          modelMismatch: true, // Mismatch detected
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!model --status",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("⚠️");
+    expect(replies[0].toLowerCase()).toContain("differs");
+  });
+});

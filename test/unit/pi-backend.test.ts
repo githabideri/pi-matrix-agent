@@ -516,6 +516,60 @@ describe("PiSessionBackend model switching with models", () => {
     // Room B's model should not be gemma4
     expect(statusB!.model).not.toBe("test-model-gemma");
   });
+
+  it("switchModel() persists desired model per room", async () => {
+    const roomId = "!room1:example.com";
+    await backend.getOrCreateSession(roomId);
+
+    // Switch to gemma4
+    const result = await backend.switchModel(roomId, "gemma4");
+    expect(result.success).toBe(true);
+
+    // Verify status includes desired model info
+    const status = await backend.getModelStatus(roomId);
+    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.desiredResolvedModelId).toBe("test-model-gemma");
+  });
+
+  it("getModelStatus() reports global default", async () => {
+    const roomId = "!room1:example.com";
+    await backend.getOrCreateSession(roomId);
+
+    const status = await backend.getModelStatus(roomId);
+    expect(status!.globalDefault).toBe("qwen27"); // From createTestAgentDir
+  });
+
+  it("getModelStatus() reports modelMismatch when active differs from desired", async () => {
+    const roomId = "!room1:example.com";
+    await backend.getOrCreateSession(roomId);
+
+    // Set desired model to gemma4
+    const backendAny = backend as any;
+    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+
+    // Get status - should show mismatch since active is qwen27 but desired is gemma4
+    const status = await backend.getModelStatus(roomId);
+    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.modelMismatch).toBe(true);
+  });
+
+  it("clearDesiredModel() removes room override", async () => {
+    const roomId = "!room1:example.com";
+    await backend.getOrCreateSession(roomId);
+
+    // Set desired model
+    const backendAny = backend as any;
+    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+
+    // Clear desired model
+    const result = await backend.clearDesiredModel(roomId);
+    expect(result.success).toBe(true);
+    expect(result.previousDesiredModel).toBe("gemma4");
+
+    // Verify room override was removed
+    const status = await backend.getModelStatus(roomId);
+    expect(status!.desiredModel).toBeUndefined();
+  });
 });
 
 // Characterization tests for global side effects
@@ -543,10 +597,10 @@ describe("PiSessionBackend model switch global side effects", () => {
     await rm(agentTestDir, { recursive: true, force: true });
   });
 
-  // Characterization test: What happens to new rooms after switching in room A?
-  it("characterization: new room after switch in room A gets switched model as default", async () => {
-    // This test characterizes the current behavior of global settings side effects
-    // After switching model in room A, what model does a fresh room B get?
+  // Phase 2: New room after switch in room A should NOT get switched model
+  it("Phase 2: new room after switch in room A uses global default, not switched model", async () => {
+    // After switching model in room A, a fresh room B should use the global default,
+    // not the switched model (Phase 2 fixes the global contamination issue).
 
     const roomA = "!roomA:example.com";
     const _sessionA = await backend.getOrCreateSession(roomA);
@@ -559,14 +613,14 @@ describe("PiSessionBackend model switch global side effects", () => {
     const roomB = "!roomB:example.com";
     const _sessionB = await backend.getOrCreateSession(roomB);
 
-    // Room B should get the switched model as its default
-    // This is because setModel() updates global settings
+    // Room B should NOT get the switched model as its default
+    // Phase 2: Each room has its own desired model, independent of global default
     const statusB = await backend.getModelStatus(roomB);
 
-    // Note: This tests the CURRENT behavior, which may have global side effects
-    // The SDK's setModel() calls settingsManager.setDefaultModelAndProvider()
-    // So new rooms will get the last switched model
-    expect(statusB!.model).toBe("test-model-gemma");
+    // Room B should use global default (qwen27), not the switched model (gemma4)
+    expect(statusB!.model).toBe("test-model-qwen");
+    expect(statusB!.desiredModel).toBeUndefined(); // No room override
+    expect(statusB!.globalDefault).toBe("qwen27");
   });
 
   // Characterization test: What happens after !reset?
@@ -589,6 +643,148 @@ describe("PiSessionBackend model switch global side effects", () => {
     // The new session after reset should get the last switched model
     // because setModel() updated the global default
     expect(statusAfterReset!.model).toBe("test-model-gemma");
+  });
+});
+
+// Phase 2: Persistence tests
+describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
+  let backend: PiSessionBackend;
+  let sessionTestDir: string;
+  let agentTestDir: string;
+
+  beforeEach(async () => {
+    sessionTestDir = join(tmpdir(), `pi-backend-phase2-test-${Date.now()}`);
+    await mkdir(sessionTestDir, { recursive: true });
+
+    agentTestDir = await createTestAgentDir(true); // with models
+
+    backend = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+  });
+
+  afterEach(async () => {
+    await backend.dispose();
+    await rm(sessionTestDir, { recursive: true, force: true });
+    await rm(agentTestDir, { recursive: true, force: true });
+  });
+
+  it("desired model persists across restart (new backend instance)", async () => {
+    const roomId = "!room1:example.com";
+
+    // Phase 1: Set desired model in first backend
+    await backend.getOrCreateSession(roomId);
+    await backend.switchModel(roomId, "gemma4");
+
+    // Verify desired model was set
+    const status1 = await backend.getModelStatus(roomId);
+    expect(status1!.desiredModel).toBe("gemma4");
+
+    // Dispose first backend (simulates restart)
+    await backend.dispose();
+
+    // Phase 2: Create new backend instance
+    const backend2 = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    // Resume session
+    await backend2.getOrCreateSession(roomId);
+
+    // Verify desired model persisted
+    const status2 = await backend2.getModelStatus(roomId);
+    expect(status2!.desiredModel).toBe("gemma4");
+
+    await backend2.dispose();
+  });
+
+  it("desired model is reapplied after !reset", async () => {
+    const roomId = "!room1:example.com";
+
+    // Set desired model to gemma4
+    await backend.getOrCreateSession(roomId);
+    await backend.switchModel(roomId, "gemma4");
+
+    // Verify desired model was set
+    const beforeReset = await backend.getModelStatus(roomId);
+    expect(beforeReset!.desiredModel).toBe("gemma4");
+
+    // Do !reset
+    await backend.reset(roomId);
+
+    // Get new session
+    await backend.getOrCreateSession(roomId);
+
+    // Verify desired model was reapplied (active model should be gemma4)
+    const afterReset = await backend.getModelStatus(roomId);
+    expect(afterReset!.desiredModel).toBe("gemma4");
+    expect(afterReset!.model).toBe("test-model-gemma");
+  });
+
+  it("desired model is reapplied on same-room resume", async () => {
+    const roomId = "!room1:example.com";
+    const backendAny = backend as any;
+
+    // Set desired model to gemma4 without actually switching (to simulate drift)
+    await backend.getOrCreateSession(roomId);
+    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+
+    // Verify desired model was set but active is still qwen27 (drift)
+    const beforeResume = await backend.getModelStatus(roomId);
+    expect(beforeResume!.desiredModel).toBe("gemma4");
+    expect(beforeResume!.modelMismatch).toBe(true);
+
+    // Remove session from cache to simulate disconnect
+    backendAny.roomStateManager.remove(roomId);
+
+    // Resume session
+    await backend.getOrCreateSession(roomId);
+
+    // Verify desired model was reapplied
+    const afterResume = await backend.getModelStatus(roomId);
+    expect(afterResume!.model).toBe("test-model-gemma");
+    expect(afterResume!.modelMismatch).toBe(false);
+  });
+
+  it("switching one room does not permanently contaminate global default", async () => {
+    const roomA = "!roomA:example.com";
+    const roomB = "!roomB:example.com";
+
+    // Switch room A to gemma4
+    await backend.getOrCreateSession(roomA);
+    await backend.switchModel(roomA, "gemma4");
+
+    // Create fresh room B
+    await backend.getOrCreateSession(roomB);
+
+    // Room B should NOT have gemma4 as desired model
+    const statusB = await backend.getModelStatus(roomB);
+    expect(statusB!.desiredModel).toBeUndefined(); // No room override
+    expect(statusB!.globalDefault).toBe("qwen27"); // Global default unchanged
+
+    // Room A should still have gemma4 as desired
+    const statusA = await backend.getModelStatus(roomA);
+    expect(statusA!.desiredModel).toBe("gemma4");
+  });
+
+  it("clear desired model falls back to global default", async () => {
+    const roomId = "!room1:example.com";
+
+    // Set desired model to gemma4
+    await backend.getOrCreateSession(roomId);
+    await backend.switchModel(roomId, "gemma4");
+
+    // Clear desired model
+    await backend.clearDesiredModel(roomId);
+
+    // Verify desired model was cleared
+    const status = await backend.getModelStatus(roomId);
+    expect(status!.desiredModel).toBeUndefined();
+    expect(status!.globalDefault).toBe("qwen27");
   });
 });
 
@@ -719,22 +915,18 @@ describe("PiSessionBackend model persistence across resume", () => {
     await backend2.dispose();
   });
 
-  it("characterization: same-room resume uses global default, not session file", async () => {
-    // CRITICAL CHARACTERIZATION TEST
-    // This test reveals the TRUE persistence mechanism for same-room resume.
+  // Phase 2: Same-room resume now re-applies desired model
+  it("Phase 2: same-room resume re-applies desired model even if global default changed", async () => {
+    // This test verifies Phase 2 behavior: same-room resume now re-applies desired model
+    // from room-models.json, independent of global default.
     //
     // Procedure:
     // 1. Start with global default = qwen27 (set by createTestAgentDir)
     // 2. Create room A (gets qwen27 as default)
-    // 3. Switch room A to gemma4
-    // 4. Confirm switch worked
-    // 5. Manually set global default back to qwen27
-    // 6. Dispose/reopen room A with continueRecent()
-    // 7. Verify resumed model
-    //
-    // Result: The resumed model is qwen27, NOT gemma4.
-    // This proves that same-room resume does NOT restore from session file's model_change entry.
-    // Persistence ONLY rides on the global default mechanism.
+    // 3. Switch room A to gemma4 (sets desired model to gemma4)
+    // 4. Manually set global default back to qwen27
+    // 5. Dispose/reopen room A
+    // 6. Verify resumed model is gemma4 (desired), not qwen27 (global default)
 
     const fs = await import("fs/promises");
     const settingsPath = join(agentTestDir, "settings.json");
@@ -759,13 +951,14 @@ describe("PiSessionBackend model persistence across resume", () => {
     console.log(`[TEST] Room A initial model: ${status!.model}`);
     expect(status!.model).toBe("test-model-qwen"); // Default from global settings
 
-    // Phase 2: Switch room A to gemma4
+    // Phase 2: Switch room A to gemma4 (sets desired model to gemma4)
     const switchResult = await backend1.switchModel(roomId, "gemma4");
     expect(switchResult.success).toBe(true);
 
     status = await backend1.getModelStatus(roomId);
-    console.log(`[TEST] Room A after switch: ${status!.model}`);
+    console.log(`[TEST] Room A after switch: ${status!.model}, desired: ${status!.desiredModel}`);
     expect(status!.model).toBe("test-model-gemma");
+    expect(status!.desiredModel).toBe("gemma4");
 
     // Phase 3: Manually reset global default to qwen27
     console.log(`[TEST] Manually resetting global default to qwen27...`);
@@ -795,14 +988,14 @@ describe("PiSessionBackend model persistence across resume", () => {
     // Phase 5: CRITICAL - Verify resumed model
     status = await backend2.getModelStatus(roomId);
     console.log(`[TEST] Room A after resume: ${status!.model}`);
+    console.log(`[TEST] Room A desired model: ${status!.desiredModel}`);
     console.log(`[TEST] Global default at resume time: qwen27`);
 
-    // RESULT: The resumed model is qwen27, NOT gemma4.
-    // This proves that same-room resume does NOT restore from session file's model_change entry.
-    // The SDK's setModel() appends model_change to session file, BUT
-    // createAgentSession() does NOT restore the model from that entry.
-    // Persistence ONLY rides on the global default mechanism.
-    expect(status!.model).toBe("test-model-qwen"); // qwen27, because global default won
+    // PHASE 2 RESULT: The resumed model is gemma4 (desired), NOT qwen27 (global default).
+    // This proves that same-room resume now re-applies desired model from room-models.json,
+    // independent of global default contamination.
+    expect(status!.model).toBe("test-model-gemma"); // gemma4, because desired model was reapplied
+    expect(status!.desiredModel).toBe("gemma4");
 
     await backend2.dispose();
   });

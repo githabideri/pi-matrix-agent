@@ -60,13 +60,21 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           "  !reset   - Clear conversation memory\n" +
           "  !control - Get control URL for this room\n" +
           "  !help    - Show this help\n" +
-          "\nModel switching:\n" +
+          "\nModel switching (Phase 2 - room-persistent):\n" +
           "  !model        - Show current model status\n" +
           "  !model --status - Show current model status\n" +
+          "  !model --clear  - Clear room override (fall back to global)\n" +
           "  !model gemma4 - Switch to Gemma4 model\n" +
           "  !model qwen27 - Switch to Qwen27 model\n" +
+          "\nShort aliases:\n" +
+          "  !m -s         - Show status (alias for !model --status)\n" +
+          "  !m -c         - Clear room override (alias for !model --clear)\n" +
           "  !m g4         - Switch to Gemma4 (alias)\n" +
           "  !m q27        - Switch to Qwen27 (alias)\n" +
+          "\nPhase 2 features:\n" +
+          "  - Model switch is room-persistent (survives restart and !reset)\n" +
+          "  - Does not contaminate global default for other rooms\n" +
+          "  - !model --clear removes room override, falls back to global\n" +
           "\nNote: Model switch is rejected while a turn is in progress.\n" +
           "\nPlain text messages are sent to pi for inference.",
       );
@@ -130,22 +138,51 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
             // Build status reply
             const lines: string[] = [];
             lines.push("Model status:");
+
+            // Active runtime model
             if (status.model) {
-              lines.push(`  Active model: ${status.model}`);
+              const mismatchIndicator = status.modelMismatch ? " ⚠️" : "";
+              lines.push(`  Active model: ${status.model}${mismatchIndicator}`);
             } else {
               lines.push("  Active model: Not set");
             }
+
+            // Thinking level
             if (status.thinkingLevel) {
               lines.push(`  Thinking level: ${status.thinkingLevel}`);
             }
+
+            // Phase 2: Desired model info
+            if (status.desiredModel) {
+              const resolvedInfo = status.desiredResolvedModelId ? ` (resolved: ${status.desiredResolvedModelId})` : "";
+              lines.push(`  Desired model: ${status.desiredModel}${resolvedInfo}`);
+            } else {
+              lines.push("  Desired model: None (using global default)");
+            }
+
+            // Global default
+            if (status.globalDefault) {
+              lines.push(`  Global default: ${status.globalDefault}`);
+            }
+
+            // Session info
             if (status.sessionId) {
               lines.push(`  Session ID: ${status.sessionId}`);
             }
             lines.push(`  Session file: ${status.sessionFile || "N/A"}`);
+
+            // Status
             if (status.isProcessing) {
               lines.push("  Status: Processing (busy)");
             } else {
               lines.push("  Status: Idle");
+            }
+
+            // Phase 2: Mismatch warning
+            if (status.modelMismatch) {
+              lines.push("");
+              lines.push("  ⚠️ Active model differs from desired.");
+              lines.push("  Send a message to apply the desired model.");
             }
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
@@ -189,7 +226,10 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
               lines.push(`  Active model: ${result.activeModel}`);
             }
             lines.push("");
-            lines.push("Note: This also updates the global default. New rooms and !reset will use this model.");
+            lines.push("Phase 2: This is now room-persistent.");
+            lines.push("  - Survives service restart");
+            lines.push("  - Survives !reset");
+            lines.push("  - Does not affect other rooms");
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           } else {
@@ -202,6 +242,37 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
         }
       } else {
         await config.sink.reply(msg.roomId, msg.eventId, "Model switching not available.");
+      }
+      return;
+    }
+
+    case "command_model_clear": {
+      // Get model switcher from options
+      const modelSwitcher = options.modelSwitcher;
+      if (modelSwitcher && (modelSwitcher as any).clearDesiredModel) {
+        try {
+          const result = await (modelSwitcher as any).clearDesiredModel(msg.roomId);
+
+          if (result.success) {
+            const lines: string[] = [];
+            lines.push(`✓ Desired model cleared for this room`);
+            lines.push(`  ${result.message}`);
+            if (result.previousDesiredModel) {
+              lines.push(`  Previous desired: ${result.previousDesiredModel}`);
+            }
+            lines.push("");
+            lines.push("This room will now use the global default model.");
+
+            await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
+          } else {
+            await config.sink.reply(msg.roomId, msg.eventId, `✗ ${result.message}`);
+          }
+        } catch (error: any) {
+          console.error(`[Router] Error clearing desired model:`, error);
+          await config.sink.reply(msg.roomId, msg.eventId, `Failed to clear desired model: ${error.message}`);
+        }
+      } else {
+        await config.sink.reply(msg.roomId, msg.eventId, "Clear desired model not available.");
       }
       return;
     }
