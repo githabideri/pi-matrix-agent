@@ -83,20 +83,13 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
         if (roomState?.roomKey) {
           // Primary: Assistant UI Spike
           const spikeUrl = `${options.controlUrl}/spike?room=${encodeURIComponent(roomState.roomKey)}`;
-          // Fallback: Original room view
-          const fallbackUrl = `${options.controlUrl}/room/${roomState.roomKey}`;
-          await config.sink.reply(
-            msg.roomId,
-            msg.eventId,
-            `Assistant UI Spike: ${spikeUrl}\n\n` + `Fallback (original view): ${fallbackUrl}`,
-          );
+          await config.sink.reply(msg.roomId, msg.eventId, `Assistant UI: ${spikeUrl}`);
         } else {
           // Room not in live state yet - user needs to send a message first
           await config.sink.reply(
             msg.roomId,
             msg.eventId,
-            "Control URL unavailable - no active session for this room yet.\n" +
-              "Send a message first to create a session, then try !control again.",
+            "No active session yet. Send a message first, then try !control.",
           );
         }
       } else {

@@ -174,7 +174,7 @@ export function routeLive(
     if (matrixTransport) {
       try {
         const mirroredPrompt = `[WebUI] ${text}`;
-        await matrixTransport.reply(roomId, "", mirroredPrompt);
+        await matrixTransport.reply(roomId, "", mirroredPrompt, { webUI: true });
         console.log(`[PROMPT] Mirrored prompt to Matrix room ${roomId}`);
       } catch (error) {
         console.warn(`[PROMPT] Failed to mirror prompt to Matrix:`, error);
@@ -188,10 +188,10 @@ export function routeLive(
       .prompt(roomId, text)
       .then((response) => {
         console.log(`[PROMPT] Completed for room ${roomKey}, response length: ${response.length}`);
-        // Mirror the final response to Matrix
+        // Mirror the final response to Matrix (simple format, no rich formatting)
         if (matrixTransport && response) {
           matrixTransport
-            .reply(roomId, "", response)
+            .reply(roomId, "", response, { webUI: true })
             .catch((err) => console.warn(`[PROMPT] Failed to mirror response to Matrix:`, err));
         }
       })
@@ -201,7 +201,7 @@ export function routeLive(
         if (matrixTransport) {
           const errorMsg = `[WebUI] Error: ${error instanceof Error ? error.message : String(error)}`;
           matrixTransport
-            .reply(roomId, "", errorMsg)
+            .reply(roomId, "", errorMsg, { webUI: true })
             .catch((err) => console.warn(`[PROMPT] Failed to mirror error to Matrix:`, err));
         }
       });

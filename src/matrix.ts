@@ -114,13 +114,72 @@ export class MatrixTransport implements ReplySink {
     console.log("Matrix bot started");
   }
 
-  async reply(roomId: string, _eventId: string, text: string): Promise<void> {
+  async reply(roomId: string, _eventId: string, text: string, options?: { webUI?: boolean }): Promise<void> {
     // For now, just send as a new message
     // TODO: Implement proper threaded reply later
+
+    // WebUI-mirrored prompts can stay simple
+    if (options?.webUI) {
+      await this.client.sendMessage(roomId, {
+        msgtype: "m.text",
+        body: text,
+      });
+      return;
+    }
+
+    // For assistant replies, send rich formatting
+    // Keep plain-text body, add formatted_body with basic HTML
+    const formattedBody = this.toSafeHtml(text);
+
     await this.client.sendMessage(roomId, {
       msgtype: "m.text",
       body: text,
+      format: "org.matrix.custom.html" as const,
+      formatted_body: formattedBody,
     });
+  }
+
+  /**
+   * Convert plain text to safe HTML for Matrix formatted_body.
+   * Basic conversion: newlines to <br>, code blocks preserved.
+   * Not a full markdown renderer - just makes common patterns readable.
+   */
+  private toSafeHtml(text: string): string {
+    // Escape HTML entities first
+    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // Convert code blocks (```code```) to <pre><code></code></pre>
+    html = html.replace(/```([\s\S]*?)```/g, (_match, code) => {
+      return `<pre><code>${code.trim()}</code></pre>`;
+    });
+
+    // Convert inline code (`code`) to <code></code>
+    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    // Convert headers
+    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+    html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+
+    // Convert bold (**text**)
+    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+    // Convert italic (*text*)
+    html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+
+    // Convert links [text](url)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+    // Convert paragraphs (double newlines)
+    html = html.replace(/\n\n/g, "</p><p>");
+
+    // Convert single newlines to breaks
+    html = html.replace(/\n/g, "<br>");
+
+    // Wrap in paragraph tags
+    html = `<p>${html}</p>`;
+
+    return html;
   }
 
   async stop(): Promise<void> {
