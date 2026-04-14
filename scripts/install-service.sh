@@ -51,12 +51,26 @@ case "$action" in
         # Check env file exists
         if [ ! -f "$ENV_FILE" ]; then
             print_warn "Environment file not found: $ENV_FILE"
-            print_warn "Creating from example..."
-            mkdir -p /etc/pi-matrix-agent
-            cp "$ENV_EXAMPLE" "$ENV_FILE"
-            print_info "Created $ENV_FILE - please review and edit before starting"
-            print_warn "Edit with: nano $ENV_FILE"
-            exit 0
+            print_warn ""
+            print_warn "============================================================================"
+            print_warn "Environment file is REQUIRED before the service can run."
+            print_warn "============================================================================"
+            print_warn ""
+            print_warn "NEXT STEPS:"
+            print_warn "  1. Create the environment file:"
+            print_warn "     mkdir -p /etc/pi-matrix-agent"
+            print_warn "     cp $ENV_EXAMPLE $ENV_FILE"
+            print_warn ""
+            print_warn "  2. Edit and configure the environment file:"
+            print_warn "     nano $ENV_FILE"
+            print_warn ""
+            print_warn "     Required: Set CONFIG_FILE and CONTROL_PUBLIC_URL"
+            print_warn ""
+            print_warn "  3. Re-run this script to install the service:"
+            print_warn "     $0"
+            print_warn ""
+            print_warn "============================================================================"
+            exit 1
         fi
         
         # Copy service file

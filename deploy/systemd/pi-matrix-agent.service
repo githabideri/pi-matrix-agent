@@ -1,4 +1,3 @@
-#!/usr/lib/systemd/system
 #
 # pi-matrix-agent.service
 # Systemd service unit for pi-matrix-agent Matrix bot

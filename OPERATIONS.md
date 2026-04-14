@@ -21,6 +21,17 @@ sudo journalctl -u pi-matrix-agent -f
 ./scripts/service-status.sh
 ```
 
+### Model Switching
+
+```bash
+# Check current model
+./scripts/model-status.sh
+
+# Switch models (requires restart)
+sudo ./scripts/model-switch.sh gemma4   # Gemma4 26B A4B
+sudo ./scripts/model-switch.sh qwen27   # Qwen3.5 27B Opus
+```
+
 ### Development (Manual)
 
 ```bash
@@ -66,6 +77,225 @@ npm run dev
                        │ Tailscale │
                        │   Serve   │
                        └───────────┘
+```
+
+---
+
+## Model Switching
+
+### Overview
+
+The pi-matrix-agent supports switching between two model profiles:
+
+| Profile | Model | Provider | Endpoint |
+|---------|-------|----------|----------|
+| `gemma4` | Gemma4 26B A4B | llama-cpp-gemma4 | 192.168.0.27:8081 |
+| `qwen27` | Qwen3.5 27B Opus | llama-cpp-qwen27 | 192.168.0.27:8080 |
+
+### Key Design Decisions
+
+- **Operational/Admin feature**: Switching is done via scripts, not chat commands
+- **Restart required**: Model changes require a service restart
+- **Dedicated bot config**: Bot has its own isolated config at `/root/.pi-matrix-agent/agent/`
+- **No hot-switching**: No in-flight session preservation across model changes
+- **CLI config untouched**: Normal Pi CLI config at `~/.pi/agent/` is not affected
+
+### Bot Config Location
+
+The bot uses a dedicated agent directory:
+
+```
+/root/.pi-matrix-agent/agent/
+├── models.json      # Model definitions for both profiles
+├── settings.json    # Active model selection
+└── auth.json        # Authentication state
+```
+
+This is **separate** from your normal Pi CLI config at `~/.pi/agent/`.
+
+---
+
+### Checking Current Model
+
+```bash
+# View current model configuration
+./scripts/model-status.sh
+```
+
+Example output:
+```
+Current Default Provider: llama-cpp-gemma4
+Current Default Model ID: gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+Model Display Name:       Gemma4 26B A4B (Matrix Bot)
+
+Available Model Profiles:
+
+  gemma4
+    Provider: llama-cpp-gemma4
+    Model:    gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+    Name:     Gemma4 26B A4B
+
+  qwen27
+    Provider: llama-cpp-qwen27
+    Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
+    Name:     Qwen3.5 27B Opus
+
+✓ Active Profile: gemma4
+```
+
+---
+
+### Switching Models
+
+```bash
+# Switch to Gemma4
+sudo ./scripts/model-switch.sh gemma4
+
+# Switch to Qwen27
+sudo ./scripts/model-switch.sh qwen27
+```
+
+### What the Switch Script Does
+
+1. **Validates** the target profile exists in `models.json`
+2. **Backs up** current `settings.json`
+3. **Updates** `settings.json` with new provider/model
+4. **Verifies** the update was successful
+5. **Restarts** the systemd service
+6. **Reports** the new active model
+
+### Example Switch Session
+
+```bash
+$ sudo ./scripts/model-switch.sh qwen27
+
+========================================
+   PI-MATRIX-AGENT MODEL SWITCH
+========================================
+
+Current Configuration:
+  Provider: llama-cpp-gemma4
+  Model:    gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+
+Target Configuration (qwen27):
+  Provider: llama-cpp-qwen27
+  Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
+  Name:     Qwen3.5 27B Opus
+
+Creating backup of current settings...
+  Backup: /root/.pi-matrix-agent/agent/settings.json.backup.20260414_123456
+
+Updating settings.json...
+  defaultProvider: llama-cpp-qwen27
+  defaultModel:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
+
+✓ Settings updated and verified
+
+Restarting systemd service...
+
+Stopping pi-matrix-agent...
+Starting pi-matrix-agent...
+  ✓ Service started
+
+  Waiting for service to be ready...
+  ✓ Service is active
+
+========================================
+Switch complete!
+========================================
+
+Now using: qwen27 (Qwen3.5 27B Opus)
+
+To verify, run:
+  ./scripts/model-switch.sh --status
+
+Service Status: active
+```
+
+### Switch Script Options
+
+```bash
+# Show help
+./scripts/model-switch.sh --help
+
+# Dry run (show what would change without applying)
+sudo ./scripts/model-switch.sh --dry-run gemma4
+
+# Show current status (alias for model-status.sh)
+./scripts/model-switch.sh --status
+```
+
+---
+
+### Verification After Switch
+
+1. **Check model status:**
+   ```bash
+   ./scripts/model-status.sh
+   ```
+
+2. **Check service is running:**
+   ```bash
+   systemctl status pi-matrix-agent
+   ```
+
+3. **Verify in Matrix:**
+   - Send `!ping` → should get single "pong"
+   - Send a question → bot responds with new model
+
+4. **Check service-status shows correct model:**
+   ```bash
+   ./scripts/service-status.sh
+   # Look for "Model Configuration" section
+   ```
+
+---
+
+### Config File Format
+
+**models.json** (`/root/.pi-matrix-agent/agent/models.json`):
+```json
+{
+  "providers": {
+    "llama-cpp-gemma4": {
+      "baseUrl": "http://192.168.0.27:8081/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-openclaw",
+      "models": [
+        {
+          "id": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+          "name": "Gemma4 26B A4B (Matrix Bot)",
+          "reasoning": true,
+          "contextWindow": 131072,
+          "maxTokens": 16384
+        }
+      ]
+    },
+    "llama-cpp-qwen27": {
+      "baseUrl": "http://192.168.0.27:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-openclaw",
+      "models": [
+        {
+          "id": "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf",
+          "name": "Qwen3.5 27B Opus (Matrix Bot)",
+          "reasoning": true,
+          "contextWindow": 204800,
+          "maxTokens": 65536
+        }
+      ]
+    }
+  }
+}
+```
+
+**settings.json** (`/root/.pi-matrix-agent/agent/settings.json`):
+```json
+{
+  "defaultProvider": "llama-cpp-gemma4",
+  "defaultModel": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+  "defaultThinkingLevel": "medium"
+}
 ```
 
 ---
@@ -448,6 +678,8 @@ sudo ./scripts/setup-serve.sh 9000 127.0.0.1
 | Config | `/root/homelab/pi-matrix-agent/config.json` |
 | Sessions | `/root/homelab/sessions/pi-matrix/` |
 | Agent dir | `/root/.pi-matrix-agent/agent/` |
+| Bot models.json | `/root/.pi-matrix-agent/agent/models.json` |
+| Bot settings.json | `/root/.pi-matrix-agent/agent/settings.json` |
 
 ---
 

@@ -186,6 +186,43 @@ check_tailscale_serve() {
     fi
 }
 
+check_model_config() {
+    print_section "Model Configuration"
+    
+    SETTINGS_FILE="/root/.pi-matrix-agent/agent/settings.json"
+    MODELS_FILE="/root/.pi-matrix-agent/agent/models.json"
+    
+    if [ -f "$SETTINGS_FILE" ]; then
+        print_ok "Settings file exists: $SETTINGS_FILE"
+        
+        # Read current model settings using grep/sed
+        DEFAULT_PROVIDER=$(grep -o '"defaultProvider"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" 2>/dev/null | sed 's/.*:.*"\([^"]*\)"/\1/')
+        DEFAULT_MODEL=$(grep -o '"defaultModel"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" 2>/dev/null | sed 's/.*:.*"\([^"]*\)"/\1/')
+        
+        if [ -n "$DEFAULT_PROVIDER" ]; then
+            print_info "  Default Provider: $DEFAULT_PROVIDER"
+        fi
+        if [ -n "$DEFAULT_MODEL" ]; then
+            print_info "  Default Model:    $DEFAULT_MODEL"
+        fi
+        
+        # Determine profile name
+        if [[ "$DEFAULT_PROVIDER" == *"gemma4"* ]]; then
+            print_info "  Profile:        gemma4"
+            print_info "  Model Name:     Gemma4 26B A4B"
+        elif [[ "$DEFAULT_PROVIDER" == *"qwen"* ]]; then
+            print_info "  Profile:        qwen27"
+            print_info "  Model Name:     Qwen3.5 27B Opus"
+        fi
+    else
+        print_error "Settings file NOT found: $SETTINGS_FILE"
+    fi
+    
+    print_info ""
+    print_info "  To switch models: sudo ./scripts/model-switch.sh <gemma4|qwen27>"
+    print_info "  To view status:   ./scripts/model-status.sh"
+}
+
 case "$action" in
     systemd)
         check_systemd_status
@@ -199,6 +236,9 @@ case "$action" in
     control-url)
         check_control_url
         ;;
+    model)
+        check_model_config
+        ;;
     full|*)
         echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
         echo -e "${BLUE}║         pi-matrix-agent Service Status Check           ║${NC}"
@@ -208,6 +248,7 @@ case "$action" in
         check_process_status
         check_environment
         check_control_url
+        check_model_config
         check_listeners
         check_tailscale_serve
         
