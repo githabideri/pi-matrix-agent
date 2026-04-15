@@ -945,6 +945,111 @@ export class PiSessionBackend {
     }
   }
 
+  /**
+   * Get all room IDs that have desired model overrides.
+   * This is the source of truth for "rooms worth rehydrating".
+   */
+  getRoomsWithDesiredModel(): string[] {
+    return this.roomModelManager.getRoomIdsWithOverrides();
+  }
+
+  /**
+   * Get the desired model for a room (from persisted state).
+   * This works even if the room is not currently live.
+   */
+  getDesiredModelForRoom(roomId: string): any {
+    return this.roomModelManager.getDesiredModel(roomId);
+  }
+
+  /**
+   * Check if a room has a persisted desired model override.
+   * This is used to determine if a room should be rehydrated.
+   */
+  hasDesiredModelOverride(roomId: string): boolean {
+    return this.roomModelManager.getDesiredModel(roomId) !== undefined;
+  }
+
+  /**
+   * Get model status for a room, with support for persisted (non-live) rooms.
+   * If the room is not live but has a desired model override, return partial status.
+   */
+  async getModelStatusWithRehydration(roomId: string): Promise<ModelStatus | null> {
+    // First try to get live room status
+    const liveStatus = await this.getModelStatus(roomId);
+    if (liveStatus) {
+      return liveStatus;
+    }
+
+    // Room is not live - check if it has persisted desired model
+    const desiredModelState = this.roomModelManager.getDesiredModel(roomId);
+    if (desiredModelState) {
+      // Return partial status for persisted room
+      return {
+        active: false, // Not currently live
+        model: undefined, // No active model
+        thinkingLevel: undefined,
+        sessionId: undefined,
+        sessionFile: undefined,
+        isProcessing: false,
+        desiredModel: desiredModelState.desiredModel,
+        desiredResolvedModelId: desiredModelState.resolvedModelId,
+        globalDefault: this.roomModelManager.getGlobalDefault(),
+        modelMismatch: false, // Can't determine without active model
+        _persisted: true, // Marker for control plane to know this is a persisted room
+      } as ModelStatus;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get live room info for control API, with support for roomKey lookup.
+   * Returns undefined if room is not live.
+   */
+  getLiveRoomInfoByRoomKey(roomKey: string): LiveRoomState | undefined {
+    return this.roomStateManager.getByKey(roomKey);
+  }
+
+  /**
+   * Check if a roomKey corresponds to a room with persisted desired model.
+   * This requires scanning all room-model overrides since we only have roomId->roomKey mapping.
+   * TODO: Consider maintaining a roomKey->roomId mapping in room-models.json for efficiency.
+   */
+  hasPersistedRoomByRoomKey(roomKey: string): boolean {
+    // Hash the roomKey to see if it matches any roomId's hash
+    // This is a workaround since we don't persist roomKey->roomId mapping
+    // A proper fix would be to store both mappings
+    const roomIds = this.getRoomsWithDesiredModel();
+    for (const roomId of roomIds) {
+      if (RoomStateManager.hashRoomId(roomId) === roomKey) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get the roomId for a roomKey by scanning live rooms and persisted room-models.
+   * Returns undefined if the roomKey is not found.
+   */
+  getRoomIdByRoomKey(roomKey: string): string | undefined {
+    // First check live rooms
+    const liveRoomId = this.roomStateManager.getRoomIdByKey(roomKey);
+    if (liveRoomId) {
+      return liveRoomId;
+    }
+
+    // Check persisted room-models (rooms with desired model overrides)
+    const roomIds = this.getRoomsWithDesiredModel();
+    for (const roomId of roomIds) {
+      if (RoomStateManager.hashRoomId(roomId) === roomKey) {
+        return roomId;
+      }
+    }
+
+    return undefined;
+  }
+
   async dispose(): Promise<void> {
     this.roomStateManager.disposeAll();
   }

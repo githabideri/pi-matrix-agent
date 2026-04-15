@@ -183,6 +183,14 @@ export class MatrixTransport implements ReplySink {
   }
 
   async stop(): Promise<void> {
-    await this.client.stop();
+    console.log("[MatrixTransport] Stopping Matrix client...");
+    try {
+      // Stop the Matrix client - this stops syncing
+      await this.client.stop();
+      console.log("[MatrixTransport] Matrix client stopped");
+    } catch (error) {
+      console.error("[MatrixTransport] Error stopping Matrix client:", error);
+      // Don't re-throw - we want to continue shutdown even if this fails
+    }
   }
 }

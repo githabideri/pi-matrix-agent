@@ -149,15 +149,41 @@ export class ControlServer {
   }
 
   async stop(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.server) {
-        this.server.close(() => {
-          console.log("[ControlServer] Stopped");
-          resolve();
-        });
-      } else {
+    return new Promise((resolve, _reject) => {
+      if (!this.server) {
+        console.log("[ControlServer] No server to stop");
         resolve();
+        return;
       }
+
+      console.log("[ControlServer] Closing HTTP server...");
+
+      // Close all existing connections
+      this.server.close((err) => {
+        if (err) {
+          console.error("[ControlServer] Error closing server:", err);
+          // Don't reject - we still want to clean up
+        }
+        console.log("[ControlServer] HTTP server closed");
+        this.server = undefined;
+        resolve();
+      });
+
+      // Timeout after 10 seconds to prevent indefinite hangs
+      // This is a safety net - if connections don't close, we force exit
+      const timeout = setTimeout(() => {
+        console.warn("[ControlServer] Server close timed out after 10s, forcing close");
+        this.server = undefined;
+        resolve();
+      }, 10000);
+
+      // Listen for unexpected errors during close
+      this.server.once("error", (err) => {
+        clearTimeout(timeout);
+        console.error("[ControlServer] Server error during close:", err);
+        this.server = undefined;
+        resolve();
+      });
     });
   }
 

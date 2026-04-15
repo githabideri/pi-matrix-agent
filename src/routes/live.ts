@@ -32,33 +32,49 @@ export function routeLive(
     console.log(`[LIVE] Getting room details for ${roomKey}`);
     const roomState = piBackend.getSessionByKey(roomKey);
 
-    if (!roomState) {
+    // Check if this is a persisted room (has desired model but not live)
+    const roomId = piBackend.getRoomIdByRoomKey(roomKey);
+    const isPersistedRoom = roomId && !roomState;
+
+    if (!roomState && !isPersistedRoom) {
       console.log(`[LIVE] Room ${roomKey} not found`);
       return res.status(404).json({ error: "Room not found" });
     }
 
-    console.log(`[LIVE] Room state found: isProcessing=${roomState.isProcessing}, snapshot=${!!roomState.snapshot}`);
+    console.log(
+      `[LIVE] Room state found: isProcessing=${roomState?.isProcessing}, snapshot=${!!roomState?.snapshot}, isPersistedRoom=${isPersistedRoom}`,
+    );
 
     try {
       console.log(`[LIVE] Building response object...`);
       // Build response directly from room state, no async calls
       const response: any = {
-        roomId: roomState.roomId,
-        roomKey: roomState.roomKey,
-        sessionId: roomState.sessionId,
-        relativeSessionPath: roomState.sessionFile
+        roomId: roomState?.roomId || roomId,
+        roomKey: roomKey,
+        sessionId: roomState?.sessionId,
+        relativeSessionPath: roomState?.sessionFile
           ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
           : undefined,
-        isProcessing: roomState.isProcessing,
-        processingStartedAt: roomState.processingStartedAt?.toISOString(),
+        isProcessing: roomState?.isProcessing || false,
+        processingStartedAt: roomState?.processingStartedAt?.toISOString(),
+        _persisted: isPersistedRoom, // Marker: room has persisted state but is not live
       };
 
       // Add snapshot data if available
-      if (roomState.snapshot) {
+      if (roomState?.snapshot) {
         response.model = roomState.snapshot.model;
         response.thinkingLevel = roomState.snapshot.thinkingLevel;
         response.toolNames = roomState.snapshot.toolNames;
         response.snapshotAt = roomState.snapshot.snapshotAt.toISOString();
+      }
+
+      // For persisted rooms, add desired model info
+      if (isPersistedRoom && roomId) {
+        const desiredModel = piBackend.getDesiredModelForRoom(roomId);
+        if (desiredModel) {
+          response.desiredModel = desiredModel.desiredModel;
+          response.desiredResolvedModelId = desiredModel.resolvedModelId;
+        }
       }
 
       console.log(`[LIVE] Response object built, sending JSON...`);
@@ -235,27 +251,48 @@ export function routeLive(
   });
 
   // GET /api/live/rooms/:roomKey/events - SSE event stream (normalized WebUI events)
-  router.get("/:roomKey/events", (req: Request, res: Response) => {
+  router.get("/:roomKey/events", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
-    const roomState = piBackend.getSessionByKey(roomKey);
+    let roomState = piBackend.getSessionByKey(roomKey);
 
-    if (!roomState) {
+    // Check if this is a persisted room (has desired model but not live)
+    const roomId = piBackend.getRoomIdByRoomKey(roomKey);
+    const isPersistedRoom = roomId && !roomState;
+
+    if (!roomState && !isPersistedRoom) {
       console.log(`[SSE] Room ${roomKey} not found`);
       return res.status(404).json({ error: "Room not found" });
     }
 
+    // Lazily hydrate persisted room on first SSE connection
+    if (isPersistedRoom && roomId) {
+      console.log(`[SSE] Lazily hydrating persisted room ${roomKey} (${roomId})`);
+      try {
+        await piBackend.getOrCreateSession(roomId);
+        roomState = piBackend.getSessionByKey(roomKey);
+        if (!roomState) {
+          console.error(`[SSE] Failed to hydrate room ${roomKey}`);
+          return res.status(500).json({ error: "Failed to hydrate room" });
+        }
+        console.log(`[SSE] Room ${roomKey} hydrated successfully`);
+      } catch (error) {
+        console.error(`[SSE] Error hydrating room ${roomKey}:`, error);
+        return res.status(500).json({ error: "Failed to hydrate room" });
+      }
+    }
+
     // Create WebUI emitter for this room
     const emitter = new WebUIEmitter({
-      roomId: roomState.roomId,
+      roomId: roomState!.roomId,
       roomKey: roomKey,
-      sessionId: roomState.sessionId || "",
+      sessionId: roomState!.sessionId || "",
     });
 
     // Attach emitter to SSE response
     const cleanup = attachEmitterToSSE(res, emitter);
 
     // Start emitting events
-    emitter.start(roomState.session);
+    emitter.start(roomState!.session);
 
     console.log(`[SSE] Client connected for room ${roomKey}`);
 

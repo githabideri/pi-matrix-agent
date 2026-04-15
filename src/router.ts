@@ -126,14 +126,40 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
       const modelSwitcher = options.modelSwitcher;
       if (modelSwitcher?.getModelStatus) {
         try {
-          const status = await modelSwitcher.getModelStatus(msg.roomId);
+          // Use rehydration-aware status method if available, otherwise fall back to regular method
+          const getModelStatusWithRehydration = (modelSwitcher as any).getModelStatusWithRehydration;
+          const status = getModelStatusWithRehydration
+            ? await getModelStatusWithRehydration(msg.roomId)
+            : await modelSwitcher.getModelStatus(msg.roomId);
 
-          if (!status?.active) {
+          // Check if this is a persisted room (has desired model but not live)
+          const isPersistedRoom = status?._persisted === true;
+
+          if (!status && !isPersistedRoom) {
             await config.sink.reply(
               msg.roomId,
               msg.eventId,
               "No active session for this room yet. Send a message first.",
             );
+          } else if (isPersistedRoom) {
+            // Persisted room - show desired model status without requiring live session
+            const lines: string[] = [];
+            lines.push("Model status (persisted room):");
+            lines.push("  Status: Not currently active (send a message to activate)");
+
+            if (status?.desiredModel) {
+              const resolvedInfo = status.desiredResolvedModelId ? ` (resolved: ${status.desiredResolvedModelId})` : "";
+              lines.push(`  Desired model: ${status.desiredModel}${resolvedInfo}`);
+            }
+
+            if (status?.globalDefault) {
+              lines.push(`  Global default: ${status.globalDefault}`);
+            }
+
+            lines.push("");
+            lines.push("  Send any message to activate this room and apply the desired model.");
+
+            await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           } else {
             // Build status reply
             const lines: string[] = [];

@@ -96,22 +96,58 @@ async function main() {
 
   console.log("pi-matrix-agent running");
 
-  // Graceful shutdown
-  process.on("SIGINT", async () => {
-    console.log("Shutting down...");
-    await piBackend.dispose();
-    await controlServer.stop();
-    await transport.stop();
-    process.exit(0);
-  });
+  // Graceful shutdown handler
+  let shuttingDown = false;
 
-  process.on("SIGTERM", async () => {
-    console.log("Shutting down...");
-    await piBackend.dispose();
-    await controlServer.stop();
-    await transport.stop();
+  async function gracefulShutdown(signal: string): Promise<void> {
+    if (shuttingDown) {
+      console.log(`[SHUTDOWN] Already shutting down, ignoring ${signal}`);
+      return;
+    }
+    shuttingDown = true;
+
+    console.log(`[SHUTDOWN] Received ${signal}, starting graceful shutdown...`);
+
+    try {
+      // Stage 1: Stop accepting new Matrix messages by stopping the client
+      console.log("[SHUTDOWN] Stage 1: Stopping Matrix client...");
+      try {
+        await transport.stop();
+        console.log("[SHUTDOWN] Stage 1: Matrix client stopped");
+      } catch (error) {
+        console.error("[SHUTDOWN] Error stopping Matrix client:", error);
+      }
+
+      // Stage 2: Close HTTP server and drain connections
+      console.log("[SHUTDOWN] Stage 2: Closing HTTP control server...");
+      try {
+        await controlServer.stop();
+        console.log("[SHUTDOWN] Stage 2: HTTP control server closed");
+      } catch (error) {
+        console.error("[SHUTDOWN] Error closing HTTP server:", error);
+      }
+
+      // Stage 3: Dispose backend (clears all room state, sessions, timeouts)
+      console.log("[SHUTDOWN] Stage 3: Disposing Pi backend...");
+      try {
+        await piBackend.dispose();
+        console.log("[SHUTDOWN] Stage 3: Pi backend disposed");
+      } catch (error) {
+        console.error("[SHUTDOWN] Error disposing backend:", error);
+      }
+
+      console.log("[SHUTDOWN] Graceful shutdown completed successfully");
+    } catch (error) {
+      console.error("[SHUTDOWN] Error during shutdown:", error);
+    }
+
+    // Exit with success code
     process.exit(0);
-  });
+  }
+
+  // Signal handlers
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 }
 
 main().catch((error) => {

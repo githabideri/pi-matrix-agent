@@ -186,4 +186,20 @@ export class RoomModelManager {
     // Fall back to global default
     return this.globalDefault;
   }
+
+  /**
+   * Get all room IDs that have desired model overrides.
+   * This is the source of truth for "rooms worth rehydrating".
+   */
+  getRoomIdsWithOverrides(): string[] {
+    return Object.keys(this.store.rooms);
+  }
+
+  /**
+   * Get the internal store (for testing and advanced operations).
+   * WARNING: Do not modify directly - use setDesiredModel/clearDesiredModel.
+   */
+  getStore(): RoomModelsStore {
+    return this.store;
+  }
 }
