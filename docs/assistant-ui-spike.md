@@ -161,6 +161,11 @@ Prompts submitted via the web UI are mirrored to the Matrix room:
   ↓
 { role: 'assistant', content: [{ type: 'text', text: 'Hi there!' }] }
 
+// Assistant message with thinking
+{ kind: 'assistant_message', text: 'Answer', thinking: 'Reasoning...' }
+  ↓
+{ role: 'assistant', content: [{ type: 'text', text: 'Answer' }], thinking: 'Reasoning...' }
+
 // Tool call
 { kind: 'tool_start', toolName: 'bash', ... }
   ↓
@@ -175,10 +180,13 @@ Prompts submitted via the web UI are mirrored to the Matrix room:
   ↓
 { role: 'user', content: [{ type: 'text', text: 'Hello' }] }
 
-// Assistant message
-{ role: 'assistant', content: [{ type: 'text', text: 'Hi' }] }
+// Assistant message with thinking
+{ role: 'assistant', content: [{ type: 'text', text: 'Answer' }], thinking: 'Reasoning...' }
   ↓
-{ role: 'assistant', content: [{ type: 'text', text: 'Hi' }] }
+{ role: 'assistant', content: [
+    { type: 'reasoning', text: 'Reasoning...' },
+    { type: 'text', text: 'Answer' }
+  ] }
 
 // Tool message - rendered as assistant with HTML
 { role: 'tool', content: '<span>Tool...</span>' }
@@ -233,7 +241,21 @@ frontend/assistant-ui-spike/
     ├── api.ts            # API client functions
     ├── adapter.ts        # Transcript/SSE conversion
     ├── adapter.test.ts   # Unit tests
-    └── styles.css        # Styling
+    ├── normalization.ts  # Message normalization layer
+    ├── styles.css        # Polished dark theme
+    └── components/
+        ├── index.ts          # Component exports
+        ├── AppShell.tsx      # App shell/layout
+        ├── ProcessingIndicator.tsx
+        ├── ModelBadge.tsx
+        ├── ThinkingBlock.tsx # Collapsible reasoning
+        ├── ToolCallCard.tsx  # Tool call display
+        ├── ToolResultCard.tsx # Tool result display
+        ├── Composer.tsx      # Message input
+        ├── MarkdownRenderer.tsx # Markdown rendering
+        ├── EmptyState.tsx    # Empty state
+        ├── LoadingState.tsx  # Loading state
+        └── ErrorState.tsx    # Error state
 ```
 
 ### Server Files Modified
@@ -324,19 +346,74 @@ npm test
 
 1. **Single room only**: The spike assumes one room key. Multi-room UX is not implemented.
 
-2. **Basic styling**: Visual styling is minimal and functional, not polished.
+2. **No authentication**: The spike assumes the control server is trusted and accessible.
 
-3. **No authentication**: The spike assumes the control server is trusted and accessible.
+3. **No archive browsing**: The spike only connects to live rooms, not archived sessions.
 
-4. **Simplified tool display**: Tool calls/results are shown as HTML snippets, not rich interactive components.
+4. **Room key entry**: Users must manually enter or know the room key.
 
-5. **No thinking visualization**: Thinking content is prepended to messages, not shown in a collapsible section.
+5. **Web UI → Matrix mirroring**: Prompts from web UI are mirrored to Matrix with `[WebUI]` prefix. The original user identity is not preserved (no Matrix auth).
 
-6. **No archive browsing**: The spike only connects to live rooms, not archived sessions.
+## Web UI → Matrix Formatting Parity
 
-7. **Room key entry**: Users must manually enter or know the room key.
+**Status**: Deferred - requires separate investigation.
 
-8. **Web UI → Matrix mirroring**: Prompts from web UI are mirrored to Matrix with `[WebUI]` prefix. The original user identity is not preserved (no Matrix auth).
+The current spike does not address the formatting parity gap between Web UI and Matrix interactions. This is a separate concern that involves:
+
+1. How messages are formatted when sent to Matrix from Web UI
+2. How Matrix-formatted responses are parsed and displayed in Web UI
+3. Rich text/markdown conversion between the two formats
+
+**TODO**: Create a separate spike or issue to address formatting parity. This would involve:
+- Inspecting how MatrixTransport formats messages
+- Comparing with how Web UI displays them
+- Implementing proper markdown/HTML conversion
+
+**File-level notes**:
+- `src/matrix.ts` - MatrixTransport.reply() method formats messages
+- `src/routes/live.ts` - POST /prompt endpoint mirrors to Matrix
+- Frontend message rendering - currently uses react-markdown
+
+## UI Features
+
+### Thinking/Reasoning Display
+
+Thinking content is now displayed in a **collapsible reasoning block** that is:
+- Visually distinct from the final answer
+- Collapsed by default (showing only a preview)
+- Easy to expand/collapse with a toggle button
+- Streamed progressively when `thinking_delta` events arrive
+
+### Tool Display
+
+Tool calls and results are rendered as **structured cards**:
+- Tool name with status indicator
+- Collapsible arguments/result sections
+- Success/error visual treatment
+- Clean visual grouping
+
+### Message Hierarchy
+
+- Visually distinct user vs assistant turns
+- User messages aligned right with colored bubbles
+- Assistant messages aligned left with avatar
+- Thinking blocks appear above the final answer
+- Proper spacing and separation between turns
+
+### App Shell
+
+- Polished dark theme with CSS variables
+- Top bar with room label, model badge, and processing indicator
+- Sticky header with backdrop blur
+- Smooth scroll-to-bottom behavior
+- Proper empty/loading/error states
+
+### Styling Architecture
+
+- CSS custom properties (design tokens) for colors, spacing, typography
+- Modular component structure for easy restyling
+- No hard-wired clone-specific assumptions
+- Centralized styling in `styles.css`
 
 ## Phase 2 Migration Considerations
 
@@ -380,3 +457,57 @@ A full migration from the current operator UI to assistant-ui would require:
 > **The browser never owns sessions, config, providers, or state.**
 >
 > On page load, all state comes from the server. On reload, the UI reconstructs from server data. The external store is a synchronized view model, not a source of truth.
+
+---
+
+## UI Pass Summary (Polished Dark Theme)
+
+### What Changed
+
+#### Data Model
+- `InternalMessage` now has a separate `thinking` field (not prepended to content)
+- `thinking_delta` SSE events properly accumulate into the thinking field
+- New `normalization.ts` layer converts InternalMessage → ThreadMessageLike
+- Thinking is converted to `ReasoningContentPart` for assistant-ui
+
+#### Rendering
+- Custom message rendering replaces assistant-ui defaults
+- Thinking displayed in collapsible `ThinkingBlock` component
+- Tool calls/results rendered as structured cards
+- Markdown rendered via `react-markdown` with `remark-gfm`
+- Proper user/assistant message hierarchy with avatars and bubbles
+
+#### Styling
+- Complete dark theme with CSS variables (design tokens)
+- Consistent spacing scale, color palette, typography
+- Polished app shell with sticky header
+- Processing indicator, model badge, session ID display
+- Smooth animations and transitions
+
+### What Stayed the Same
+- `ExternalStoreRuntime` architecture
+- Server-authoritative model
+- SSE event model
+- POST prompt submission
+- Transcript fetch on load
+
+### Build/Test Results
+- ✅ Build succeeds
+- ✅ All 20 tests pass
+- ✅ TypeScript compilation clean
+- ✅ No runtime errors
+
+### Streaming Behavior Verified
+- ✅ Partial text streaming via `text_delta`
+- ✅ Thinking accumulation via `thinking_delta`
+- ✅ Tool call/result transitions
+- ✅ Scroll-to-bottom on new messages
+- ✅ No duplicate/flickering content
+
+### Intentionally Missing
+- Multi-room UX
+- Archive browser
+- Authentication
+- Theme switcher
+- Attachments
+- Web UI → Matrix formatting parity (deferred)

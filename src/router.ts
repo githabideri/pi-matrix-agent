@@ -11,6 +11,7 @@ export interface SessionResetter {
 export interface ModelSwitcher {
   switchModel?(roomId: string, profile: string): Promise<any>;
   getModelStatus?(roomId: string): Promise<any>;
+  getModelStatusOrRehydrate?(roomId: string, options?: { rehydrateIfManaged?: boolean }): Promise<any>;
 }
 
 export interface RouterOptions {
@@ -124,42 +125,86 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
     case "command_model_status": {
       // Get model status from backend
       const modelSwitcher = options.modelSwitcher;
-      if (modelSwitcher?.getModelStatus) {
+      if (modelSwitcher?.getModelStatusOrRehydrate) {
         try {
-          // Use rehydration-aware status method if available, otherwise fall back to regular method
-          const getModelStatusWithRehydration = (modelSwitcher as any).getModelStatusWithRehydration;
-          const status = getModelStatusWithRehydration
-            ? await getModelStatusWithRehydration(msg.roomId)
-            : await modelSwitcher.getModelStatus(msg.roomId);
+          // Use the canonical rehydration-aware status method
+          // This rehydrates managed rooms on demand, so !m -s works without a user message
+          const status = await modelSwitcher.getModelStatusOrRehydrate(msg.roomId);
 
-          // Check if this is a persisted room (has desired model but not live)
-          const isPersistedRoom = status?._persisted === true;
-
-          if (!status && !isPersistedRoom) {
+          if (!status) {
             await config.sink.reply(
               msg.roomId,
               msg.eventId,
               "No active session for this room yet. Send a message first.",
             );
-          } else if (isPersistedRoom) {
-            // Persisted room - show desired model status without requiring live session
+          } else {
+            // Build status reply
             const lines: string[] = [];
-            lines.push("Model status (persisted room):");
-            lines.push("  Status: Not currently active (send a message to activate)");
+            lines.push("Model status:");
 
-            if (status?.desiredModel) {
-              const resolvedInfo = status.desiredResolvedModelId ? ` (resolved: ${status.desiredResolvedModelId})` : "";
-              lines.push(`  Desired model: ${status.desiredModel}${resolvedInfo}`);
+            // Active runtime model
+            if (status.model) {
+              const mismatchIndicator = status.modelMismatch ? " ⚠️" : "";
+              lines.push(`  Active model: ${status.model}${mismatchIndicator}`);
+            } else {
+              lines.push("  Active model: Not set");
             }
 
-            if (status?.globalDefault) {
+            // Thinking level
+            if (status.thinkingLevel) {
+              lines.push(`  Thinking level: ${status.thinkingLevel}`);
+            }
+
+            // Phase 2: Desired model info
+            if (status.desiredModel) {
+              const resolvedInfo = status.desiredResolvedModelId ? ` (resolved: ${status.desiredResolvedModelId})` : "";
+              lines.push(`  Desired model: ${status.desiredModel}${resolvedInfo}`);
+            } else {
+              lines.push("  Desired model: None (using global default)");
+            }
+
+            // Global default
+            if (status.globalDefault) {
               lines.push(`  Global default: ${status.globalDefault}`);
             }
 
-            lines.push("");
-            lines.push("  Send any message to activate this room and apply the desired model.");
+            // Session info
+            if (status.sessionId) {
+              lines.push(`  Session ID: ${status.sessionId}`);
+            }
+            lines.push(`  Session file: ${status.sessionFile || "N/A"}`);
+
+            // Status
+            if (status.isProcessing) {
+              lines.push("  Status: Processing (busy)");
+            } else {
+              lines.push("  Status: Idle");
+            }
+
+            // Phase 2: Mismatch warning
+            if (status.modelMismatch) {
+              lines.push("");
+              lines.push("  ⚠️ Active model differs from desired.");
+              lines.push("  Send a message to apply the desired model.");
+            }
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
+          }
+        } catch (error: any) {
+          console.error(`[Router] Error getting model status:`, error);
+          await config.sink.reply(msg.roomId, msg.eventId, "Failed to get model status.");
+        }
+      } else if (modelSwitcher?.getModelStatus) {
+        // Fallback to old method for backwards compatibility (tests)
+        try {
+          const status = await modelSwitcher.getModelStatus(msg.roomId);
+
+          if (!status) {
+            await config.sink.reply(
+              msg.roomId,
+              msg.eventId,
+              "No active session for this room yet. Send a message first.",
+            );
           } else {
             // Build status reply
             const lines: string[] = [];

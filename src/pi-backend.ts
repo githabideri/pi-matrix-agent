@@ -970,39 +970,6 @@ export class PiSessionBackend {
   }
 
   /**
-   * Get model status for a room, with support for persisted (non-live) rooms.
-   * If the room is not live but has a desired model override, return partial status.
-   */
-  async getModelStatusWithRehydration(roomId: string): Promise<ModelStatus | null> {
-    // First try to get live room status
-    const liveStatus = await this.getModelStatus(roomId);
-    if (liveStatus) {
-      return liveStatus;
-    }
-
-    // Room is not live - check if it has persisted desired model
-    const desiredModelState = this.roomModelManager.getDesiredModel(roomId);
-    if (desiredModelState) {
-      // Return partial status for persisted room
-      return {
-        active: false, // Not currently live
-        model: undefined, // No active model
-        thinkingLevel: undefined,
-        sessionId: undefined,
-        sessionFile: undefined,
-        isProcessing: false,
-        desiredModel: desiredModelState.desiredModel,
-        desiredResolvedModelId: desiredModelState.resolvedModelId,
-        globalDefault: this.roomModelManager.getGlobalDefault(),
-        modelMismatch: false, // Can't determine without active model
-        _persisted: true, // Marker for control plane to know this is a persisted room
-      } as ModelStatus;
-    }
-
-    return null;
-  }
-
-  /**
    * Get live room info for control API, with support for roomKey lookup.
    * Returns undefined if room is not live.
    */
@@ -1048,6 +1015,67 @@ export class PiSessionBackend {
     }
 
     return undefined;
+  }
+
+  /**
+   * Get model status for a room, with optional rehydration of managed rooms.
+   *
+   * This is the canonical status getter that should be used by both:
+   * - Matrix `!m -s` command
+   * - HTTP control-plane status routes
+   *
+   * If `rehydrateIfManaged` is true and the room is not live but has a persisted
+   * desired model override, the room will be rehydrated (session created/resumed)
+   * so that status can be reported.
+   *
+   * @param roomId The Matrix room ID
+   * @param options Options for status retrieval
+   * @param options.rehydrateIfManaged If true, rehydrate managed rooms on demand
+   * @returns ModelStatus or null if room doesn't exist and can't be rehydrated
+   */
+  async getModelStatusOrRehydrate(
+    roomId: string,
+    options?: { rehydrateIfManaged?: boolean },
+  ): Promise<ModelStatus | null> {
+    // First try to get live room status
+    const liveStatus = await this.getModelStatus(roomId);
+    if (liveStatus) {
+      return liveStatus;
+    }
+
+    // Room is not live - check if it has persisted desired model
+    const desiredModelState = this.roomModelManager.getDesiredModel(roomId);
+    if (!desiredModelState) {
+      return null; // Not a managed room, truly doesn't exist
+    }
+
+    // This is a managed room with persisted desired model
+    // If rehydration is enabled, rehydrate the room
+    if (options?.rehydrateIfManaged !== false) {
+      console.log(`[PiSessionBackend] Rehydrating managed room ${roomId} on demand for status query`);
+      try {
+        await this.getOrCreateSession(roomId);
+        // Now return the live status
+        return await this.getModelStatus(roomId);
+      } catch (error: any) {
+        console.error(`[PiSessionBackend] Error rehydrating room ${roomId}:`, error.message);
+        // Return partial status even on rehydration failure
+      }
+    }
+
+    // Return partial status for persisted room (not rehydrated or rehydration failed)
+    return {
+      active: false, // Not currently live
+      model: undefined, // No active model
+      thinkingLevel: undefined,
+      sessionId: undefined,
+      sessionFile: undefined,
+      isProcessing: false,
+      desiredModel: desiredModelState.desiredModel,
+      desiredResolvedModelId: desiredModelState.resolvedModelId,
+      globalDefault: this.roomModelManager.getGlobalDefault(),
+      modelMismatch: false, // Can't determine without active model
+    } as ModelStatus;
   }
 
   async dispose(): Promise<void> {

@@ -70,12 +70,9 @@ describe('transcriptItemToMessage', () => {
     const message = transcriptItemToMessage(item);
 
     expect(message.role).toBe('assistant');
-    expect(message.content).toHaveLength(2);
-    expect(message.content[0]).toEqual({
-      type: 'text',
-      text: 'Thinking: Let me think about this...',
-    });
-    expect(message.content[1]).toEqual({ type: 'text', text: 'The answer is 42.' });
+    expect(message.content).toHaveLength(1);
+    expect(message.content[0]).toEqual({ type: 'text', text: 'The answer is 42.' });
+    expect(message.thinking).toBe('Let me think about this...');
   });
 
   it('converts tool_start to tool message', () => {
@@ -125,9 +122,8 @@ describe('transcriptItemToMessage', () => {
     const message = transcriptItemToMessage(item);
 
     expect(message.role).toBe('assistant');
-    expect(message.content).toEqual([
-      { type: 'text', text: '<thinking>This is my reasoning process</thinking>' },
-    ]);
+    expect(message.content).toEqual([]);
+    expect(message.thinking).toBe('This is my reasoning process');
   });
 });
 

@@ -30,51 +30,63 @@ export function routeLive(
   router.get("/:roomKey", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     console.log(`[LIVE] Getting room details for ${roomKey}`);
-    const roomState = piBackend.getSessionByKey(roomKey);
+    let roomState = piBackend.getSessionByKey(roomKey);
 
     // Check if this is a persisted room (has desired model but not live)
     const roomId = piBackend.getRoomIdByRoomKey(roomKey);
     const isPersistedRoom = roomId && !roomState;
 
-    if (!roomState && !isPersistedRoom) {
+    // Rehydrate managed room on demand for control-plane access
+    if (isPersistedRoom && roomId) {
+      console.log(`[LIVE] Rehydrating managed room ${roomKey} (${roomId}) on demand`);
+      try {
+        await piBackend.getOrCreateSession(roomId);
+        roomState = piBackend.getSessionByKey(roomKey);
+        if (!roomState) {
+          console.error(`[LIVE] Failed to rehydrate room ${roomKey}`);
+          return res.status(500).json({ error: "Failed to rehydrate room" });
+        }
+        console.log(`[LIVE] Room ${roomKey} rehydrated successfully`);
+      } catch (error: any) {
+        console.error(`[LIVE] Error rehydrating room ${roomKey}:`, error);
+        return res.status(500).json({ error: "Failed to rehydrate room" });
+      }
+    }
+
+    if (!roomState) {
       console.log(`[LIVE] Room ${roomKey} not found`);
       return res.status(404).json({ error: "Room not found" });
     }
 
-    console.log(
-      `[LIVE] Room state found: isProcessing=${roomState?.isProcessing}, snapshot=${!!roomState?.snapshot}, isPersistedRoom=${isPersistedRoom}`,
-    );
+    console.log(`[LIVE] Room state found: isProcessing=${roomState.isProcessing}, snapshot=${!!roomState.snapshot}`);
 
     try {
       console.log(`[LIVE] Building response object...`);
       // Build response directly from room state, no async calls
       const response: any = {
-        roomId: roomState?.roomId || roomId,
+        roomId: roomState.roomId,
         roomKey: roomKey,
-        sessionId: roomState?.sessionId,
-        relativeSessionPath: roomState?.sessionFile
+        sessionId: roomState.sessionId,
+        relativeSessionPath: roomState.sessionFile
           ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
           : undefined,
-        isProcessing: roomState?.isProcessing || false,
-        processingStartedAt: roomState?.processingStartedAt?.toISOString(),
-        _persisted: isPersistedRoom, // Marker: room has persisted state but is not live
+        isProcessing: roomState.isProcessing,
+        processingStartedAt: roomState.processingStartedAt?.toISOString(),
       };
 
       // Add snapshot data if available
-      if (roomState?.snapshot) {
+      if (roomState.snapshot) {
         response.model = roomState.snapshot.model;
         response.thinkingLevel = roomState.snapshot.thinkingLevel;
         response.toolNames = roomState.snapshot.toolNames;
         response.snapshotAt = roomState.snapshot.snapshotAt.toISOString();
       }
 
-      // For persisted rooms, add desired model info
-      if (isPersistedRoom && roomId) {
-        const desiredModel = piBackend.getDesiredModelForRoom(roomId);
-        if (desiredModel) {
-          response.desiredModel = desiredModel.desiredModel;
-          response.desiredResolvedModelId = desiredModel.resolvedModelId;
-        }
+      // Add desired model info from persisted state
+      const desiredModel = piBackend.getDesiredModelForRoom(roomState.roomId);
+      if (desiredModel) {
+        response.desiredModel = desiredModel.desiredModel;
+        response.desiredResolvedModelId = desiredModel.resolvedModelId;
       }
 
       console.log(`[LIVE] Response object built, sending JSON...`);

@@ -25,6 +25,7 @@ export class ControlServer {
   private port: number;
   private host: string;
   private matrixTransport?: MatrixTransport;
+  private activeConnections: Set<any> = new Set(); // Track active HTTP connections for graceful shutdown
 
   constructor(
     piBackend: PiSessionBackend,
@@ -45,6 +46,16 @@ export class ControlServer {
     // Set up EJS template engine
     this.app.set("view engine", "ejs");
     this.app.set("views", path.join(__dirname, "../views"));
+
+    // Track active connections for graceful shutdown
+    this.app.use((req, _res, next) => {
+      const conn = (req as any).socket;
+      if (conn) {
+        this.activeConnections.add(conn);
+        conn.on("close", () => this.activeConnections.delete(conn));
+      }
+      next();
+    });
 
     // Serve static files
     this.app.use("/static", express.static(path.join(__dirname, "../public")));
@@ -158,7 +169,21 @@ export class ControlServer {
 
       console.log("[ControlServer] Closing HTTP server...");
 
-      // Close all existing connections
+      // First, close all active connections explicitly
+      const connectionCount = this.activeConnections.size;
+      if (connectionCount > 0) {
+        console.log(`[ControlServer] Closing ${connectionCount} active connection(s)...`);
+        for (const conn of this.activeConnections) {
+          try {
+            conn.destroy();
+          } catch (err) {
+            console.debug(`[ControlServer] Error destroying connection:`, err);
+          }
+        }
+        this.activeConnections.clear();
+      }
+
+      // Then close the server
       this.server.close((err) => {
         if (err) {
           console.error("[ControlServer] Error closing server:", err);
@@ -169,13 +194,13 @@ export class ControlServer {
         resolve();
       });
 
-      // Timeout after 10 seconds to prevent indefinite hangs
+      // Timeout after 5 seconds to prevent indefinite hangs
       // This is a safety net - if connections don't close, we force exit
       const timeout = setTimeout(() => {
-        console.warn("[ControlServer] Server close timed out after 10s, forcing close");
+        console.warn("[ControlServer] Server close timed out after 5s, forcing close");
         this.server = undefined;
         resolve();
-      }, 10000);
+      }, 5000);
 
       // Listen for unexpected errors during close
       this.server.once("error", (err) => {

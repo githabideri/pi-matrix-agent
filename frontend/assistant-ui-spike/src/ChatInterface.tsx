@@ -2,34 +2,46 @@
  * Chat Interface Component
  *
  * Uses assistant-ui's ExternalStoreRuntime for server-backed state.
- * 
  * Server remains authoritative:
  * - Transcript loaded from server on mount
- * - SSE updates stream in progressively
+ * - SSE updates stream in progressively  
  * - Prompts submitted to server via onNew
  * - Browser state is only a synchronized view
- * 
- * React state synchronization:
- * - Uses useSyncExternalStore to subscribe to store changes
- * - Ensures React rerenders when SSE events update the store
+ *
+ * Architecture:
+ * - Keeps assistant-ui Thread structure for scrolling/composer
+ * - Custom message rendering for thinking/thinking blocks
+ * - Custom app shell, top bar, and states
  */
 
 import React, { useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
-import {
+import { 
   useExternalStoreRuntime,
   Thread,
-  Composer,
   ThreadPrimitive,
+  type AppendMessage,
 } from '@assistant-ui/react';
 
 import { getLiveRoom, getTranscript, submitPrompt, createEventStream } from './api';
 import {
   transcriptToMessages,
   processEvent,
-  extractTextFromMessage,
   type AdapterState,
+  type InternalMessage,
 } from './adapter';
 import type { WebUIEvent } from './types';
+import { normalizeMessage } from './normalization';
+
+// Custom components
+import { AppShell } from './components/AppShell';
+import { Composer as CustomComposer } from './components/Composer';
+import { EmptyState } from './components/EmptyState';
+import { LoadingState } from './components/LoadingState';
+import { ErrorState } from './components/ErrorState';
+import { ThinkingBlock } from './components/ThinkingBlock';
+import { ToolCallCard } from './components/ToolCallCard';
+import { ToolResultCard } from './components/ToolResultCard';
+import { MarkdownRenderer } from './components/MarkdownRenderer';
 
 // Simple external store - holds server-synced state
 interface ExternalStore {
@@ -59,6 +71,119 @@ interface ChatInterfaceProps {
   roomKey: string;
 }
 
+/**
+ * Custom message content renderer.
+ * Handles thinking blocks, tool cards, and markdown content.
+ */
+function MessageContent({ 
+  message, 
+  isStreaming 
+}: { 
+  message: InternalMessage; 
+  isStreaming: boolean;
+}) {
+  const isUser = message.role === 'user';
+  
+  // Get text content from message
+  const getTextContent = () => {
+    if (typeof message.content === 'string') return message.content;
+    return message.content.filter(c => c.type === 'text').map(c => c.text).join('');
+  };
+  
+  const textContent = getTextContent();
+
+  // User message
+  if (isUser) {
+    return (
+      <div className="user-message-content">
+        <MarkdownRenderer text={textContent} />
+      </div>
+    );
+  }
+
+  // Assistant or tool message
+  if (message.role === 'tool' && message.name) {
+    // Tool messages
+    if (textContent.includes('Tool Call:')) {
+      const match = textContent.match(/Tool Call:\s*(.+?)(?:\n|$)/s);
+      if (match) {
+        const toolName = match[1].trim().replace(/<[^>]*>/g, '');
+        return <ToolCallCard toolName={toolName} />;
+      }
+    }
+    if (textContent.includes('Result:')) {
+      const match = textContent.match(/Result:\s*(\S+)\s*(\S)/s);
+      if (match) {
+        const toolName = match[1];
+        const success = match[2] === '✓';
+        return <ToolResultCard toolName={toolName} success={success} />;
+      }
+    }
+    return <MarkdownRenderer text={textContent} />;
+  }
+
+  // Assistant message with optional thinking
+  return (
+    <div className="assistant-message-content">
+      {message.thinking && (
+        <ThinkingBlock content={message.thinking} isStreaming={isStreaming} />
+      )}
+      {textContent && <MarkdownRenderer text={textContent} />}
+      {isStreaming && (
+        <span className="streaming-cursor">▊</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Custom message component that renders user/assistant messages
+ * with proper avatars, bubbles, and positioning.
+ */
+function CustomMessage({ message, isStreaming }: { message: InternalMessage; isStreaming: boolean }) {
+  const isUser = message.role === 'user';
+  
+  return (
+    <div className={`message-row ${isUser ? 'user-row' : 'assistant-row'}`}>
+      {isUser ? (
+        // User message - bubble on right
+        <div className="message-bubble user-bubble">
+          <MessageContent message={message} isStreaming={isStreaming} />
+        </div>
+      ) : (
+        // Assistant message - avatar on left, content on right
+        <>
+          <div className="message-avatar">🤖</div>
+          <div className="message-content-wrapper">
+            <MessageContent message={message} isStreaming={isStreaming} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Custom messages list that renders thinking blocks separately from text.
+ * This allows thinking to be collapsible and visually distinct.
+ */
+function CustomMessages({ messages }: { messages: InternalMessage[] }) {
+  return (
+    <div className="custom-messages">
+      {messages.map((message) => {
+        const isStreaming = message.isStreaming || false;
+        return (
+          <CustomMessage
+            key={message.id}
+            message={message}
+            isStreaming={isStreaming}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function ChatInterface({ roomKey }: ChatInterfaceProps) {
   // External store for server-synchronized state
   const storeRef = useRef<ExternalStore | null>(null);
@@ -75,18 +200,18 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
   }
   const store = storeRef.current;
 
-  // CRITICAL FIX: Use useSyncExternalStore to subscribe to store changes.
-  // This ensures React rerenders when SSE events update the store.
-  // Without this, useExternalStoreRuntime receives stale captured values.
+  // Subscribe to store changes - ensures React re-renders
   const liveState = useSyncExternalStore(
     store.subscribe,
     () => store.getState(),
-    () => store.getState() // snapshotForCache - same as getSnapshot for simplicity
+    () => store.getState()
   );
 
   // UI state for loading/errors
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [roomData, setRoomData] = React.useState<{ model?: string } | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load initial transcript from server
   useEffect(() => {
@@ -110,6 +235,8 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
           isProcessing: room.isProcessing,
           activeToolCalls: new Map(),
         });
+        
+        setRoomData({ model: room.model });
       } catch (err) {
         setError(`Failed to load room: ${(err as Error).message}`);
       } finally {
@@ -126,20 +253,42 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
       const currentState = store.getState();
       const newState = processEvent(currentState, event);
       store.setState(newState);
+      
+      // Update room data if model changes
+      if (event.type === 'state_change' && event.state?.model) {
+        setRoomData({ model: event.state.model });
+      }
     });
 
     return () => cleanup();
   }, [roomKey, store]);
 
-  // Handle prompt submission - sends to server
-  const handleOnNew = useCallback(
-    async (message: any) => {
-      const text = extractTextFromMessage(message);
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [liveState.messages.length]);
 
-      if (!text) return;
+  // Handle prompt submission - sends to server
+  // Accepts AppendMessage type as per assistant-ui contract
+  const handleOnNew = useCallback(
+    async (message: AppendMessage) => {
+      // Extract text from AppendMessage
+      const content = message.content;
+      let text = '';
+      
+      if (typeof content === 'string') {
+        text = content;
+      } else {
+        text = content
+          .filter(c => c.type === 'text')
+          .map(c => c.text)
+          .join('');
+      }
+      
+      if (!text.trim()) return;
 
       try {
-        await submitPrompt(roomKey, text);
+        await submitPrompt(roomKey, text.trim());
 
         // Mark as processing - response comes via SSE
         store.setState({
@@ -153,81 +302,81 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     [roomKey, store]
   );
 
-  // Convert our InternalMessage to ThreadMessageLike
-  const convertMessage = useCallback(
-    (msg: any) => {
-      // Tool messages rendered as assistant messages with HTML
-      if (msg.role === 'tool') {
-        return {
-          role: 'assistant' as const,
-          content: [{ type: 'text' as const, text: msg.content }],
-        };
-      }
-
-      return {
-        role: msg.role,
-        content: Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content) }],
-        id: msg.id,
-        createdAt: msg.createdAt,
-      };
-    },
-    []
-  );
-
-  // Create ExternalStoreRuntime with LIVE state from useSyncExternalStore
-  // liveState is reactive and triggers rerenders when updated
+  // Create ExternalStoreRuntime with proper normalization
   const runtime = useExternalStoreRuntime({
     messages: liveState.messages,
     isRunning: liveState.isProcessing,
     onNew: handleOnNew,
-    convertMessage,
+    // Convert InternalMessage to ThreadMessageLike using normalization layer
+    convertMessage: (msg: InternalMessage) => normalizeMessage(msg),
   });
 
   if (isLoading) {
     return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p>Loading room {roomKey}...</p>
+      <div className="full-screen-center">
+        <LoadingState roomKey={roomKey} />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="error-container">
-        <p className="error-message">{error}</p>
-        <button onClick={() => window.location.reload()}>Retry</button>
+      <div className="full-screen-center">
+        <ErrorState message={error} onRetry={() => window.location.reload()} />
       </div>
     );
   }
 
   return (
-    <div className="chat-interface">
-      <header className="chat-header">
-        <h1>Room: {roomKey}</h1>
-        <div className="room-meta">
-          <span>Session: {liveState.sessionId || 'N/A'}</span>
-          <span className={liveState.isProcessing ? 'processing' : ''}>
-            {liveState.isProcessing ? 'Processing...' : 'Ready'}
-          </span>
-        </div>
-      </header>
-
-      <div className="chat-container">
+    <AppShell
+      roomKey={roomKey}
+      sessionId={liveState.sessionId || 'N/A'}
+      isProcessing={liveState.isProcessing}
+      model={roomData?.model}
+    >
+      <div className="thread-container">
         <Thread.Root config={{ runtime }}>
           <Thread.Viewport>
-            <ThreadPrimitive.Empty>
-              <p>No messages yet. Start the conversation!</p>
-            </ThreadPrimitive.Empty>
-            <Thread.Messages />
+            {liveState.messages.length === 0 ? (
+              <ThreadPrimitive.Empty>
+                <EmptyState />
+              </ThreadPrimitive.Empty>
+            ) : (
+              <CustomMessages messages={liveState.messages} />
+            )}
+            
+            {/* Processing indicator */}
+            {liveState.isProcessing && (
+              <div className="processing-placeholder">
+                <div className="typing-indicator">
+                  <span>●</span>
+                  <span>●</span>
+                  <span>●</span>
+                </div>
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
           </Thread.Viewport>
+          
           <Thread.ViewportFooter>
-            <Composer />
+            <CustomComposer
+              isProcessing={liveState.isProcessing}
+              onSend={(text: string) => handleOnNew({
+                role: 'user',
+                content: [{ type: 'text', text }],
+                parentId: null,
+                sourceId: null,
+                runConfig: undefined,
+                attachments: [],
+              })}
+            />
           </Thread.ViewportFooter>
+          
           <Thread.ScrollToBottom />
         </Thread.Root>
       </div>
-    </div>
+    </AppShell>
   );
 }
 

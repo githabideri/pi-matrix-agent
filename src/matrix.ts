@@ -186,6 +186,7 @@ export class MatrixTransport implements ReplySink {
     console.log("[MatrixTransport] Stopping Matrix client...");
     try {
       // Stop the Matrix client - this stops syncing
+      // This is async and should complete within a few seconds
       await this.client.stop();
       console.log("[MatrixTransport] Matrix client stopped");
     } catch (error) {

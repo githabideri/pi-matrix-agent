@@ -108,38 +108,56 @@ async function main() {
 
     console.log(`[SHUTDOWN] Received ${signal}, starting graceful shutdown...`);
 
+    // Set a hard timeout for the entire shutdown process (15 seconds total)
+    const shutdownTimeout = setTimeout(() => {
+      console.error("[SHUTDOWN] Hard timeout reached - forcing exit");
+      process.exit(1);
+    }, 15000);
+
     try {
       // Stage 1: Stop accepting new Matrix messages by stopping the client
       console.log("[SHUTDOWN] Stage 1: Stopping Matrix client...");
-      try {
-        await transport.stop();
-        console.log("[SHUTDOWN] Stage 1: Matrix client stopped");
-      } catch (error) {
-        console.error("[SHUTDOWN] Error stopping Matrix client:", error);
-      }
+      const stopMatrixPromise = transport.stop();
+      // Wait up to 5 seconds for Matrix client to stop
+      await Promise.race([
+        stopMatrixPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Matrix client stop timeout")), 5000)),
+      ]);
+      console.log("[SHUTDOWN] Stage 1: Matrix client stopped");
+    } catch (error: any) {
+      console.error("[SHUTDOWN] Error or timeout stopping Matrix client:", error.message);
+    }
 
+    try {
       // Stage 2: Close HTTP server and drain connections
       console.log("[SHUTDOWN] Stage 2: Closing HTTP control server...");
-      try {
-        await controlServer.stop();
-        console.log("[SHUTDOWN] Stage 2: HTTP control server closed");
-      } catch (error) {
-        console.error("[SHUTDOWN] Error closing HTTP server:", error);
-      }
+      const stopServerPromise = controlServer.stop();
+      // Wait up to 5 seconds for HTTP server to close
+      await Promise.race([
+        stopServerPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("HTTP server close timeout")), 5000)),
+      ]);
+      console.log("[SHUTDOWN] Stage 2: HTTP control server closed");
+    } catch (error: any) {
+      console.error("[SHUTDOWN] Error or timeout closing HTTP server:", error.message);
+    }
 
+    try {
       // Stage 3: Dispose backend (clears all room state, sessions, timeouts)
       console.log("[SHUTDOWN] Stage 3: Disposing Pi backend...");
-      try {
-        await piBackend.dispose();
-        console.log("[SHUTDOWN] Stage 3: Pi backend disposed");
-      } catch (error) {
-        console.error("[SHUTDOWN] Error disposing backend:", error);
-      }
-
-      console.log("[SHUTDOWN] Graceful shutdown completed successfully");
-    } catch (error) {
-      console.error("[SHUTDOWN] Error during shutdown:", error);
+      const disposeBackendPromise = piBackend.dispose();
+      // Wait up to 3 seconds for backend disposal
+      await Promise.race([
+        disposeBackendPromise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Backend disposal timeout")), 3000)),
+      ]);
+      console.log("[SHUTDOWN] Stage 3: Pi backend disposed");
+    } catch (error: any) {
+      console.error("[SHUTDOWN] Error or timeout disposing backend:", error.message);
     }
+
+    clearTimeout(shutdownTimeout);
+    console.log("[SHUTDOWN] Graceful shutdown completed successfully");
 
     // Exit with success code
     process.exit(0);

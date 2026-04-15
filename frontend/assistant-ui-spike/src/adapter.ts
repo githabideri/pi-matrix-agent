@@ -36,6 +36,8 @@ export interface InternalMessage {
   content: Array<{ type: 'text'; text: string }> | string;
   createdAt: Date;
   name?: string;
+  thinking?: string;  // Separate thinking/reasoning content
+  isStreaming?: boolean;  // Track if message is still being streamed
 }
 
 /**
@@ -83,18 +85,11 @@ export function transcriptItemToMessage(item: TranscriptItem): InternalMessage {
       };
 
     case 'assistant_message': {
-      const content: Array<{ type: 'text'; text: string }> = [
-        { type: 'text' as const, text: item.text },
-      ];
-
-      if (item.thinking) {
-        content.unshift({ type: 'text' as const, text: `Thinking: ${item.thinking}` });
-      }
-
       return {
         id,
         role: 'assistant',
-        content,
+        content: [{ type: 'text' as const, text: item.text }],
+        thinking: item.thinking,
         createdAt,
       };
     }
@@ -120,15 +115,13 @@ export function transcriptItemToMessage(item: TranscriptItem): InternalMessage {
     }
 
     case 'thinking':
+      // Thinking items from transcript are converted to assistant messages
+      // with thinking content. This preserves the thinking for display.
       return {
         id,
         role: 'assistant',
-        content: [
-          {
-            type: 'text' as const,
-            text: `<thinking>${item.text}</thinking>`,
-          },
-        ],
+        content: [],
+        thinking: item.text,
         createdAt,
       };
   }
@@ -237,6 +230,41 @@ export function processEvent(
 
     case 'message_update': {
       const delta = event.content.delta;
+      
+      // Handle thinking delta separately
+      if (event.content.type === 'thinking_delta') {
+        let assistantMessage = findLastMessageByRole(state.messages, 'assistant');
+        
+        if (!assistantMessage) {
+          assistantMessage = {
+            id: generateId(),
+            role: 'assistant',
+            content: [],
+            thinking: delta,
+            createdAt: new Date(event.timestamp),
+            isStreaming: true,
+          };
+          return {
+            ...state,
+            messages: [...state.messages, assistantMessage],
+          };
+        }
+        
+        const updatedMessage = {
+          ...assistantMessage,
+          thinking: (assistantMessage.thinking || '') + delta,
+          isStreaming: true,
+        };
+        const messageIndex = state.messages.findIndex((m) => m.id === assistantMessage.id);
+        if (messageIndex >= 0) {
+          const newMessages = [...state.messages];
+          newMessages[messageIndex] = updatedMessage;
+          return { ...state, messages: newMessages };
+        }
+        return state;
+      }
+      
+      // Handle regular text delta
       let assistantMessage = findLastMessageByRole(state.messages, 'assistant');
 
       if (!assistantMessage) {
@@ -251,7 +279,7 @@ export function processEvent(
       const messageIndex = state.messages.findIndex((m) => m.id === assistantMessage.id);
       if (messageIndex >= 0) {
         const newMessages = [...state.messages];
-        newMessages[messageIndex] = updatedMessage;
+        newMessages[messageIndex] = { ...updatedMessage, isStreaming: true };
         return { ...state, messages: newMessages };
       }
       return state;
@@ -299,8 +327,14 @@ export function processEvent(
       };
     }
 
-    case 'turn_end':
-      return { ...state, isProcessing: false };
+    case 'turn_end': {
+      // Clear isStreaming flag from all messages
+      const newMessages = state.messages.map(msg => ({
+        ...msg,
+        isStreaming: false,
+      }));
+      return { ...state, isProcessing: false, messages: newMessages };
+    }
 
     case 'state_change': {
       if (event.changeType === 'processing_start') {

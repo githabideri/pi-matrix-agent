@@ -341,51 +341,6 @@ describe("Rehydration - Control Plane Discovery", () => {
     await rm(agentTestDir, { recursive: true, force: true });
   });
 
-  // This test characterizes the CURRENT broken behavior
-  // After the fix, this test should pass
-  it("characterization: persisted room is discoverable via control plane after 'restart'", async () => {
-    // Phase 1: Set up a room with desired model
-    const backend1 = new PiSessionBackend({
-      sessionBaseDir: sessionTestDir,
-      cwd: process.cwd(),
-      agentDir: agentTestDir,
-    });
-
-    const roomId = "!room1:example.com";
-    await backend1.getOrCreateSession(roomId);
-
-    // Set desired model
-    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
-
-    // Verify room is discoverable
-    const roomState1 = backend1.getSessionByKey(RoomStateManager.hashRoomId(roomId));
-    expect(roomState1).toBeDefined();
-
-    await backend1.dispose();
-
-    // Phase 2: Simulate restart - new backend instance
-    const backend2 = new PiSessionBackend({
-      sessionBaseDir: sessionTestDir,
-      cwd: process.cwd(),
-      agentDir: agentTestDir,
-    });
-
-    // CURRENT BEHAVIOR: Room is NOT discoverable until a message arrives
-    // EXPECTED BEHAVIOR: Room should be discoverable via control plane
-    const roomKey = RoomStateManager.hashRoomId(roomId);
-    const roomState2 = backend2.getSessionByKey(roomKey);
-
-    // THIS IS THE BUG - roomState2 is undefined after restart
-    // After the fix, this should pass
-    // For now, we document the expected behavior
-    console.log(`[TEST] Room state after restart: ${roomState2 ? "FOUND" : "NOT FOUND (expected after fix)"}`);
-
-    // The fix should make this pass:
-    // expect(roomState2).toBeDefined();
-
-    await backend2.dispose();
-  });
-
   // This test validates the new rehydration behavior
   it("rehydration: persisted room is discoverable via getRoomIdByRoomKey after 'restart'", async () => {
     // Phase 1: Set up a room with desired model
@@ -426,7 +381,7 @@ describe("Rehydration - Control Plane Discovery", () => {
   });
 
   // This test validates that model status works for persisted rooms
-  it("rehydration: getModelStatusWithRehydration returns status for persisted room", async () => {
+  it("rehydration: getModelStatusOrRehydrate returns status for persisted room", async () => {
     // Phase 1: Set up a room with desired model
     const backend1 = new PiSessionBackend({
       sessionBaseDir: sessionTestDir,
@@ -450,14 +405,109 @@ describe("Rehydration - Control Plane Discovery", () => {
     });
 
     // Use the rehydration-aware status method
-    const status = await backend2.getModelStatusWithRehydration(roomId);
+    const status = await backend2.getModelStatusOrRehydrate(roomId);
 
     // Status should be available even though room is not live
     expect(status).not.toBeNull();
-    expect(status!._persisted).toBe(true);
     expect(status!.desiredModel).toBe("gemma4");
     expect(status!.desiredResolvedModelId).toBe("test-model-gemma");
-    expect(status!.active).toBe(false); // Not currently live
+
+    await backend2.dispose();
+  });
+
+  // This test validates that on-demand rehydration works
+  it("rehydration: on-demand rehydration makes room live via getModelStatusOrRehydrate", async () => {
+    // Phase 1: Set up a room with desired model
+    const backend1 = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    const roomId = "!room1:example.com";
+    await backend1.getOrCreateSession(roomId);
+
+    // Set desired model
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+
+    await backend1.dispose();
+
+    // Phase 2: Simulate restart - new backend instance
+    const backend2 = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    // Verify room is not live initially
+    expect(backend2.getSessionByKey(RoomStateManager.hashRoomId(roomId))).toBeUndefined();
+
+    // Call getModelStatusOrRehydrate which should rehydrate the room
+    const status = await backend2.getModelStatusOrRehydrate(roomId);
+
+    // Status should be available
+    expect(status).not.toBeNull();
+    expect(status!.desiredModel).toBe("gemma4");
+
+    // Room should now be live (rehydrated)
+    expect(backend2.getSessionByKey(RoomStateManager.hashRoomId(roomId))).toBeDefined();
+
+    await backend2.dispose();
+  });
+
+  // This test validates that non-managed rooms return null
+  it("rehydration: non-managed room returns null from getModelStatusOrRehydrate", async () => {
+    const backend = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    const roomId = "!nonexistent:example.com";
+
+    // Room has no persisted state, so status should be null
+    const status = await backend.getModelStatusOrRehydrate(roomId);
+
+    expect(status).toBeNull();
+
+    await backend.dispose();
+  });
+
+  // This test validates the regression: !m -s works without a user message
+  it("regression: status query works for persisted room without user message", async () => {
+    // Phase 1: Set up a room with desired model
+    const backend1 = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    const roomId = "!room1:example.com";
+    await backend1.getOrCreateSession(roomId);
+
+    // Set desired model
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+
+    await backend1.dispose();
+
+    // Phase 2: Simulate restart - new backend instance
+    const backend2 = new PiSessionBackend({
+      sessionBaseDir: sessionTestDir,
+      cwd: process.cwd(),
+      agentDir: agentTestDir,
+    });
+
+    // CRITICAL: Status query should work WITHOUT a user message first
+    // This is the regression test for the "!m -s returns 'No active session'" bug
+    const status = await backend2.getModelStatusOrRehydrate(roomId);
+
+    // Should return status, not null
+    expect(status).not.toBeNull();
+    expect(status!.desiredModel).toBe("gemma4");
+
+    // Room should now be live after rehydration
+    const roomState = backend2.getSessionByKey(RoomStateManager.hashRoomId(roomId));
+    expect(roomState).toBeDefined();
 
     await backend2.dispose();
   });
