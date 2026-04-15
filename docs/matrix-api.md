@@ -8,7 +8,7 @@ For quick testing, use the built-in test script:
 
 ```bash
 # Copy the example environment file
-cp .env.matrix.example .env.matrix
+cp .env.example .env.matrix
 
 # Edit with your configuration
 # (or set via environment variables)
@@ -156,7 +156,7 @@ sendMessage('Hello, bot!').then(console.log);
 
 ## Environment Variables for Testing
 
-Copy `.env.matrix.example` to `.env.matrix` and configure:
+Copy `.env.example` to `.env.matrix` and configure:
 
 ```bash
 cp .env.matrix.example .env.matrix

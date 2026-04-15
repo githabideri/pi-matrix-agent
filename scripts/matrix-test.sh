@@ -38,6 +38,46 @@ fi
 ROOM_ID="${MATRIX_ROOM_ID:-!ZqbmhmaXDWWgORmNfF:matrixbot.home.macl.at}"
 LIMIT="${LIMIT:-10}"
 
+# Hash function matching TypeScript implementation in pi-backend.ts
+# private hashRoomId(roomId: string): string {
+#   let hash = 0;
+#   for (let i = 0; i < roomId.length; i++) {
+#     const char = roomId.charCodeAt(i);
+#     hash = (hash << 5) - hash + char;
+#     hash = hash & hash; // Convert to 32bit integer
+#   }
+#   return Math.abs(hash).toString(16);
+# }
+hash_room_id() {
+    local room_id="$1"
+    local hash=0
+    local len=${#room_id}
+    
+    for ((i=0; i<len; i++)); do
+        local char="${room_id:i:1}"
+        local char_code=$(printf '%d' "'$char")
+        
+        # TypeScript: hash = (hash << 5) - hash + char
+        # Must subtract ORIGINAL hash, not shifted hash
+        local orig_hash=$hash
+        hash=$((hash << 5))
+        hash=$((hash - orig_hash + char_code))
+        
+        # Truncate to unsigned 32-bit (JavaScript auto-truncates)
+        hash=$((hash & 0xFFFFFFFF))
+    done
+    
+    # Convert unsigned 32-bit to signed 32-bit interpretation
+    # Then take absolute value (matching Math.abs() in TypeScript)
+    if [ $hash -gt 2147483647 ]; then
+        hash=$((hash - 4294967296))
+    fi
+    if [ $hash -lt 0 ]; then
+        hash=$((hash * -1))
+    fi
+    printf '%x' $hash
+}
+
 send_message() {
     local message="$1"
     local token="${2:-$MATRIX_ACCESS_TOKEN}"
@@ -77,6 +117,9 @@ wait_for_idle() {
     local max_wait="${1:-30}"
     local start=$(date +%s)
     
+    # Derive room key from MATRIX_ROOM_ID using the same hash function as the backend
+    local room_key=$(hash_room_id "$ROOM_ID")
+    
     while true; do
         local now=$(date +%s)
         local elapsed=$((now - start))
@@ -85,7 +128,7 @@ wait_for_idle() {
             return 1
         fi
         
-        local is_processing=$(curl -s "http://127.0.0.1:9000/api/live/rooms/625e66af" | python3 -c "import sys,json; print(json.load(sys.stdin).get('isProcessing', False))" 2>/dev/null || echo "false")
+        local is_processing=$(curl -s "http://127.0.0.1:9000/api/live/rooms/$room_key" | python3 -c "import sys,json; print(json.load(sys.stdin).get('isProcessing', False))" 2>/dev/null || echo "false")
         
         if [ "$is_processing" = "False" ] || [ "$is_processing" = "false" ]; then
             echo "Room is now idle (waited ${elapsed}s)"

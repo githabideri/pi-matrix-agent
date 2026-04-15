@@ -19,6 +19,26 @@ export class PiSessionBackend {
   private roomStateManager: RoomStateManager;
   private roomModelManager: RoomModelManager;
 
+  // Serialization mutex for critical sections (session bind, model reconcile, global default restore)
+  // This prevents race conditions where one room could observe another room's temporary settings.json mutation
+  private _serializationLock: { locked: boolean; waiters: Array<() => void> } = { locked: false, waiters: [] };
+
+  private async _acquireMutex(): Promise<() => void> {
+    // Wait for current lock to be released
+    while (this._serializationLock.locked) {
+      await new Promise<void>((resolve) => {
+        this._serializationLock.waiters.push(resolve);
+      });
+    }
+    this._serializationLock.locked = true;
+    return () => {
+      this._serializationLock.locked = false;
+      // Wake up one waiter
+      const waiter = this._serializationLock.waiters.shift();
+      if (waiter) waiter();
+    };
+  }
+
   constructor(options: PiSessionBackendOptions) {
     this.sessionBaseDir = options.sessionBaseDir;
     this.cwd = options.cwd ?? process.cwd();
@@ -99,8 +119,13 @@ export class PiSessionBackend {
     this.updateSnapshotFromSession(roomState, session);
 
     // Phase 2: Apply desired room model if it differs from active model
-    // Await to ensure model is applied before returning the session
-    await this.applyDesiredRoomModelIfDifferent(roomId, session);
+    // Acquire serialization mutex to prevent race conditions with other rooms
+    const releaseMutex = await this._acquireMutex();
+    try {
+      await this.applyDesiredRoomModelIfDifferent(roomId, session);
+    } finally {
+      releaseMutex();
+    }
 
     return session;
   }
@@ -366,8 +391,13 @@ export class PiSessionBackend {
       const _newRoomState = this.roomStateManager.getOrCreateSession(roomId, session, session.sessionFile);
 
       // Phase 2: Apply desired room model if it differs from active model
-      // Await to ensure model is applied before considering reset complete
-      await this.applyDesiredRoomModelIfDifferent(roomId, session);
+      // Acquire serialization mutex to prevent race conditions with other rooms
+      const releaseMutex = await this._acquireMutex();
+      try {
+        await this.applyDesiredRoomModelIfDifferent(roomId, session);
+      } finally {
+        releaseMutex();
+      }
 
       console.log(`[PiSessionBackend] Reset complete for room ${roomId}`);
     } catch (error) {
@@ -854,29 +884,35 @@ export class PiSessionBackend {
     }
 
     try {
-      // Get current active model for status message
-      const previousActiveModel = session.model?.id || session.model?.name || "previous";
+      // Acquire serialization mutex for the model switch operation
+      const releaseMutex = await this._acquireMutex();
+      try {
+        // Get current active model for status message
+        const previousActiveModel = session.model?.id || session.model?.name || "previous";
 
-      // Use the safe helper that preserves global default (with finally block)
-      const activeModel = await this.applyModelWithGlobalDefaultRestore(session, targetModel);
+        // Use the safe helper that preserves global default (with finally block)
+        const activeModel = await this.applyModelWithGlobalDefaultRestore(session, targetModel);
 
-      // Phase 2: Persist desired model per room (independent of global default)
-      this.roomModelManager.setDesiredModel(roomId, requestedProfile, targetModel.id);
+        // Phase 2: Persist desired model per room (independent of global default)
+        this.roomModelManager.setDesiredModel(roomId, requestedProfile, targetModel.id);
 
-      // Update snapshot immediately
-      this.updateSnapshotFromSession(roomState, session);
+        // Update snapshot immediately
+        this.updateSnapshotFromSession(roomState, session);
 
-      console.log(
-        `[PiSessionBackend] Model switched for room ${roomId}: ${previousActiveModel} -> ${activeModel} (desired: ${requestedProfile})`,
-      );
+        console.log(
+          `[PiSessionBackend] Model switched for room ${roomId}: ${previousActiveModel} -> ${activeModel} (desired: ${requestedProfile})`,
+        );
 
-      return {
-        success: true,
-        message: `Model switched from "${previousActiveModel}" to "${activeModel}"`,
-        requestedProfile,
-        resolvedModel: targetModel.id,
-        activeModel,
-      };
+        return {
+          success: true,
+          message: `Model switched from "${previousActiveModel}" to "${activeModel}"`,
+          requestedProfile,
+          resolvedModel: targetModel.id,
+          activeModel,
+        };
+      } finally {
+        releaseMutex();
+      }
     } catch (error: any) {
       console.error(`[PiSessionBackend] Error switching model for room ${roomId}:`, error);
       return {

@@ -570,6 +570,56 @@ describe("PiSessionBackend model switching with models", () => {
     const status = await backend.getModelStatus(roomId);
     expect(status!.desiredModel).toBeUndefined();
   });
+
+  // Concurrency characterization test: Verify serialization prevents contamination
+  it("concurrency: sequential model switches are serialized and do not contaminate global default", async () => {
+    // This test characterizes that the serialization mutex prevents race conditions
+    // where one room could observe another room's temporary settings.json mutation.
+    //
+    // Test procedure:
+    // 1. Create room A and room B
+    // 2. Switch room A to gemma4
+    // 3. Immediately switch room B to qwen27
+    // 4. Verify neither room was contaminated by the other's operation
+    // 5. Verify global default was not contaminated
+
+    const fs = await import("fs/promises");
+    const settingsPath = join(agentTestDir, "settings.json");
+
+    // Create both rooms
+    const roomA = "!roomA:example.com";
+    const roomB = "!roomB:example.com";
+    await backend.getOrCreateSession(roomA);
+    await backend.getOrCreateSession(roomB);
+
+    // Read original settings
+    const originalSettings = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    expect(originalSettings.defaultProvider).toBe("llama-cpp-qwen27");
+    expect(originalSettings.defaultModel).toBe("test-model-qwen");
+
+    // Switch room A to gemma4
+    const resultA = await backend.switchModel(roomA, "gemma4");
+    expect(resultA.success).toBe(true);
+
+    // Immediately switch room B to qwen27 (explicitly, even though it's the default)
+    const resultB = await backend.switchModel(roomB, "qwen27");
+    expect(resultB.success).toBe(true);
+
+    // Verify room A has gemma4
+    const statusA = await backend.getModelStatus(roomA);
+    expect(statusA!.model).toBe("test-model-gemma");
+    expect(statusA!.desiredModel).toBe("gemma4");
+
+    // Verify room B has qwen27
+    const statusB = await backend.getModelStatus(roomB);
+    expect(statusB!.model).toBe("test-model-qwen");
+    expect(statusB!.desiredModel).toBe("qwen27");
+
+    // Verify global default was NOT contaminated
+    const settingsAfter = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
+    expect(settingsAfter.defaultProvider).toBe(originalSettings.defaultProvider);
+    expect(settingsAfter.defaultModel).toBe(originalSettings.defaultModel);
+  });
 });
 
 // Characterization tests for global side effects
