@@ -300,6 +300,15 @@ export function processEvent(
             isProcessing: true,
           };
         }
+        
+        // Clear pending message from set if it was found (reconciliation complete)
+        // This runs when either: message exists in list, OR it's marked as pending
+        // Both cases mean the prompt is accounted for and should be removed from pending
+        if (existingMessage || isPending) {
+          const newPendingUserMessages = new Set(state.pendingUserMessages || []);
+          newPendingUserMessages.delete(promptForComparison);
+          return { ...state, isProcessing: true, pendingUserMessages: newPendingUserMessages };
+        }
       }
       return { ...state, isProcessing: true };
     }
@@ -325,6 +334,15 @@ export function processEvent(
           ...state,
           messages: [...state.messages, userMessage],
         };
+      }
+      
+      // Clear pending message from set if it was found (reconciliation complete)
+      // This runs when either: message exists in list, OR it's marked as pending
+      // Both cases mean the prompt is accounted for and should be removed from pending
+      if (existingMessage || isPending) {
+        const newPendingUserMessages = new Set(state.pendingUserMessages || []);
+        newPendingUserMessages.delete(promptForComparison);
+        return { ...state, pendingUserMessages: newPendingUserMessages };
       }
       return state;
     }

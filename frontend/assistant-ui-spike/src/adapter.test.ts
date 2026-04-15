@@ -718,6 +718,155 @@ describe('User Message Event (Matrix-originated)', () => {
   });
 });
 
+describe('Pending Message Cleanup', () => {
+  it('clears pending message from set when turn_start arrives after optimistic update', () => {
+    // Initial state with optimistic user message (trimmed text, no [WebUI] prefix)
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'optimistic-001',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello, world!' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Hello, world!', 'Another pending message']),
+    };
+
+    // turn_start event arrives with [WebUI] prefixed promptPreview
+    const event: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Hello, world!',
+    };
+
+    const newState = processEvent(state, event);
+
+    // Pending message should be cleared after reconciliation
+    expect(newState.pendingUserMessages?.has('Hello, world!')).toBe(false);
+    // Other pending messages should still be there
+    expect(newState.pendingUserMessages?.has('Another pending message')).toBe(true);
+  });
+
+  it('clears pending message from set when user_message arrives after optimistic update', () => {
+    // Initial state with optimistic user message (trimmed text, no [WebUI] prefix)
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'optimistic-001',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello from Matrix!' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Hello from Matrix!']),
+    };
+
+    // user_message event arrives (Matrix-originated, no [WebUI] prefix)
+    const event: WebUIEvent = {
+      type: 'user_message',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: 'Hello from Matrix!',
+    };
+
+    const newState = processEvent(state, event);
+
+    // Pending message should be cleared after reconciliation
+    expect(newState.pendingUserMessages?.has('Hello from Matrix!')).toBe(false);
+  });
+});
+
+describe('Repeated Identical Prompts', () => {
+  it('allows repeated identical prompts in separate turns', () => {
+    // First turn: optimistic update + turn_start
+    let state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        // Optimistic user message for first turn
+        {
+          id: 'optimistic-001',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Hello']),
+    };
+
+    // First turn_start arrives
+    const event1: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Hello',
+    };
+
+    state = processEvent(state, event1);
+    
+    // First turn_end clears isProcessing
+    const endEvent1: WebUIEvent = {
+      type: 'turn_end',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      success: true,
+    };
+    state = processEvent(state, endEvent1);
+
+    // Second turn: same prompt, different turn
+    // Optimistic update adds the message again
+    state.messages.push({
+      id: 'optimistic-002',
+      role: 'user',
+      content: [{ type: 'text', text: 'Hello' }],
+      createdAt: new Date(),
+    });
+    state.pendingUserMessages = new Set(['Hello']);
+
+    // Second turn_start arrives with same prompt
+    const event2: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-002',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Hello',
+    };
+
+    state = processEvent(state, event2);
+
+    // Should have two user messages (one from each turn)
+    expect(state.messages.filter(m => m.role === 'user')).toHaveLength(2);
+    // Pending message should be cleared after reconciliation
+    expect(state.pendingUserMessages?.has('Hello')).toBe(false);
+  });
+});
+
 describe('Optimistic User Message Deduplication', () => {
   it('does not duplicate user message when turn_start arrives after optimistic update', () => {
     // Initial state with optimistic user message (trimmed text, no [WebUI] prefix)
@@ -755,6 +904,8 @@ describe('Optimistic User Message Deduplication', () => {
     expect(newState.messages[0].role).toBe('user');
     expect((newState.messages[0].content[0] as any).text).toBe('Hello, world!');
     expect(newState.isProcessing).toBe(true);
+    // Pending message should be cleared after reconciliation
+    expect(newState.pendingUserMessages?.has('Hello, world!')).toBe(false);
   });
 
   it('adds user message when turn_start arrives without prior optimistic update', () => {

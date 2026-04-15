@@ -122,9 +122,7 @@ export class ControlServer {
     const spikeDistPath = path.join(__dirname, "../frontend/assistant-ui-spike/dist");
 
     // Serve spike index.html with room key from query param
-    console.log("[ControlServer] Setting up /spike route");
     this.app.get("/spike", async (_req: Request, res: Response) => {
-      console.log("[ControlServer] /spike route hit!");
       const fs = await import("fs/promises");
       const indexPath = path.join(spikeDistPath, "index.html");
 
