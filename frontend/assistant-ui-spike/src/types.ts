@@ -70,6 +70,7 @@ export interface ToolStartItem extends BaseTranscriptItem {
   kind: 'tool_start';
   toolName: string;
   toolCallId?: string;
+  arguments?: string;
 }
 
 /**

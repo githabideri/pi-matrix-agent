@@ -103,21 +103,27 @@ function MessageContent({
 
   // Assistant or tool message
   if (message.role === 'tool' && message.name) {
-    // Tool messages
-    if (textContent.includes('Tool Call:')) {
-      const match = textContent.match(/Tool Call:\s*(.+?)(?:\n|$)/s);
-      if (match) {
-        const toolName = match[1].trim().replace(/<[^>]*>/g, '');
-        return <ToolCallCard toolName={toolName} />;
-      }
+    // Use structured tool data if available
+    if (message.toolCallId !== undefined && message.toolResult === undefined) {
+      // Tool call (no result yet)
+      return (
+        <ToolCallCard 
+          toolName={message.name} 
+          arguments={message.toolArguments}
+          toolCallId={message.toolCallId}
+        />
+      );
     }
-    if (textContent.includes('Result:')) {
-      const match = textContent.match(/Result:\s*(\S+)\s*(\S)/s);
-      if (match) {
-        const toolName = match[1];
-        const success = match[2] === '✓';
-        return <ToolResultCard toolName={toolName} success={success} />;
-      }
+    if (message.toolResult !== undefined) {
+      // Tool result
+      return (
+        <ToolResultCard 
+          toolName={message.name}
+          success={message.toolSuccess ?? true}
+          result={message.toolResult}
+          toolCallId={message.toolCallId}
+        />
+      );
     }
     return <MarkdownRenderer text={textContent} />;
   }
@@ -213,6 +219,10 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
   const [roomData, setRoomData] = React.useState<{ model?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Scroll behavior state
+  const [isNearBottom, setIsNearBottom] = React.useState(true);
+  const viewportRef = useRef<HTMLDivElement>(null);
+
   // Load initial transcript from server
   useEffect(() => {
     async function loadInitialData() {
@@ -263,10 +273,44 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     return () => cleanup();
   }, [roomKey, store]);
 
-  // Scroll to bottom when messages change
+  // Check scroll position - returns true if near bottom (within 150px)
+  const checkIsNearBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return true;
+    const threshold = 150; // px
+    const scrollBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    return scrollBottom < threshold;
+  }, []);
+
+  // Update isNearBottom state
+  const updateIsNearBottom = useCallback(() => {
+    setIsNearBottom(checkIsNearBottom());
+  }, [checkIsNearBottom]);
+
+  // Scroll to bottom when messages change - only if user is near bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [liveState.messages.length]);
+    if (isNearBottom && messagesEndRef.current) {
+      // Small delay to ensure DOM is updated
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        });
+      });
+    }
+  }, [liveState.messages.length, isNearBottom]);
+
+  // Listen to scroll events to update isNearBottom
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    
+    const handleScroll = () => updateIsNearBottom();
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    // Check initial position
+    updateIsNearBottom();
+    
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, [updateIsNearBottom]);
 
   // Handle prompt submission - sends to server
   // Accepts AppendMessage type as per assistant-ui contract
@@ -336,7 +380,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     >
       <div className="thread-container">
         <Thread.Root config={{ runtime }}>
-          <Thread.Viewport>
+          <div ref={viewportRef} className="custom-viewport">
             {liveState.messages.length === 0 ? (
               <ThreadPrimitive.Empty>
                 <EmptyState />
@@ -357,7 +401,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
             )}
             
             <div ref={messagesEndRef} />
-          </Thread.Viewport>
+          </div>
           
           <Thread.ViewportFooter>
             <CustomComposer
@@ -373,7 +417,17 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
             />
           </Thread.ViewportFooter>
           
-          <Thread.ScrollToBottom />
+          {/* Jump to bottom button - only shown when user scrolled away */}
+          {!isNearBottom && (
+            <Thread.ScrollToBottom>
+              <button
+                onClick={() => viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: 'smooth' })}
+                className="ai-ScrollToButton"
+              >
+                ↓ Jump to latest
+              </button>
+            </Thread.ScrollToBottom>
+          )}
         </Thread.Root>
       </div>
     </AppShell>

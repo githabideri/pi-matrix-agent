@@ -380,3 +380,302 @@ describe('extractTextFromMessage', () => {
     expect(extractTextFromMessage(message as any)).toBe('Hello world');
   });
 });
+
+describe('Streaming - No Duplicate Messages', () => {
+  it('accumulates text_delta to existing assistant message without creating duplicates', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'assistant-001',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hello' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: true,
+      activeToolCalls: new Map(),
+    };
+
+    // Apply multiple text_delta events
+    const event1: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'text_delta', delta: ' world' },
+    };
+
+    const state1 = processEvent(state, event1);
+    expect(state1.messages).toHaveLength(1); // Still only one message
+    expect((state1.messages[0].content[0] as any).text).toBe('Hello world');
+
+    const event2: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'text_delta', delta: '!' },
+    };
+
+    const state2 = processEvent(state1, event2);
+    expect(state2.messages).toHaveLength(1); // Still only one message
+    expect((state2.messages[0].content[0] as any).text).toBe('Hello world!');
+  });
+
+  it('accumulates thinking_delta to existing assistant message without creating duplicates', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'assistant-001',
+          role: 'assistant',
+          content: [{ type: 'text', text: '' }],
+          thinking: 'Step 1',
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: true,
+      activeToolCalls: new Map(),
+    };
+
+    const event: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'thinking_delta', delta: '\nStep 2' },
+    };
+
+    const newState = processEvent(state, event);
+    expect(newState.messages).toHaveLength(1); // Still only one message
+    expect(newState.messages[0].thinking).toBe('Step 1\nStep 2');
+  });
+});
+
+describe('Tool Data Preservation', () => {
+  it('tool_start event preserves arguments in InternalMessage', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+    };
+
+    const event: WebUIEvent = {
+      type: 'tool_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      toolCallId: 'call-001',
+      toolName: 'bash',
+      arguments: '{"command": "grep -r \\"hello\\" .""}',
+    };
+
+    const newState = processEvent(state, event);
+    expect(newState.messages).toHaveLength(1);
+    const toolMessage = newState.messages[0] as InternalMessage;
+    expect(toolMessage.toolCallId).toBe('call-001');
+    expect(toolMessage.toolArguments).toBe('{"command": "grep -r \\"hello\\" .""}');
+    expect(toolMessage.toolResult).toBeUndefined();
+  });
+
+  it('tool_end event preserves result and success in InternalMessage', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map([['call-001', { toolName: 'bash' }]]),
+    };
+
+    const event: WebUIEvent = {
+      type: 'tool_end',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      toolCallId: 'call-001',
+      toolName: 'bash',
+      success: true,
+      result: 'Found 5 matches in 3 files',
+    };
+
+    const newState = processEvent(state, event);
+    expect(newState.messages).toHaveLength(1);
+    const toolMessage = newState.messages[0] as InternalMessage;
+    expect(toolMessage.toolCallId).toBe('call-001');
+    expect(toolMessage.toolResult).toBe('Found 5 matches in 3 files');
+    expect(toolMessage.toolSuccess).toBe(true);
+  });
+
+  it('transcript tool_start item preserves arguments', () => {
+    const item: ToolStartItem = {
+      kind: 'tool_start',
+      id: 'tool-001',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      toolName: 'read',
+      toolCallId: 'call-001',
+      arguments: '{"path": "README.md"}',
+    };
+
+    const message = transcriptItemToMessage(item);
+    expect(message.toolCallId).toBe('call-001');
+    expect(message.toolArguments).toBe('{"path": "README.md"}');
+  });
+
+  it('transcript tool_end item preserves result and success', () => {
+    const item: ToolEndItem = {
+      kind: 'tool_end',
+      id: 'tool-002',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      toolName: 'read',
+      toolCallId: 'call-002',
+      success: false,
+      result: 'File not found: README.md',
+    };
+
+    const message = transcriptItemToMessage(item);
+    expect(message.toolCallId).toBe('call-002');
+    expect(message.toolResult).toBe('File not found: README.md');
+    expect(message.toolSuccess).toBe(false);
+  });
+});
+
+describe('Reasoning Preview', () => {
+  it('preserves thinking content for preview display', () => {
+    const longThinking = [
+      'Step 1: Analyze the problem',
+      'Step 2: Consider the options',
+      'Step 3: Evaluate each option',
+      'Step 4: Make a decision',
+      'Step 5: Verify the solution',
+    ].join('\n');
+
+    const item: AssistantMessageItem = {
+      kind: 'assistant_message',
+      id: 'msg-003',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      text: 'The answer is 42.',
+      thinking: longThinking,
+    };
+
+    const message = transcriptItemToMessage(item);
+
+    // Verify thinking is preserved
+    expect(message.thinking).toBe(longThinking);
+
+    // Verify first 3 lines would be visible as preview
+    const lines = longThinking.split('\n');
+    expect(lines).toHaveLength(5);
+    expect(lines.slice(0, 3)).toEqual([
+      'Step 1: Analyze the problem',
+      'Step 2: Consider the options',
+      'Step 3: Evaluate each option',
+    ]);
+  });
+
+  it('thinking_delta accumulates correctly for streaming preview', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: true,
+      activeToolCalls: new Map(),
+    };
+
+    // First thinking delta
+    const event1: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'thinking_delta', delta: 'Step 1: Analyze' },
+    };
+
+    const state1 = processEvent(state, event1);
+    expect(state1.messages).toHaveLength(1);
+    expect(state1.messages[0].thinking).toBe('Step 1: Analyze');
+
+    // Second thinking delta
+    const event2: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'thinking_delta', delta: '\nStep 2: Consider' },
+    };
+
+    const state2 = processEvent(state1, event2);
+    expect(state2.messages).toHaveLength(1); // Still only one message
+    expect(state2.messages[0].thinking).toBe('Step 1: Analyze\nStep 2: Consider');
+  });
+});
+
+describe('Canonical Rendering Path', () => {
+  it('InternalMessage contains all data needed for rendering without HTML parsing', () => {
+    // Tool call message
+    const toolCall: InternalMessage = {
+      id: 'tool-001',
+      role: 'tool',
+      name: 'bash',
+      content: 'legacy html string',
+      createdAt: new Date(),
+      toolCallId: 'call-001',
+      toolArguments: '{"command": "ls -la"}',
+    };
+
+    // Tool result message
+    const toolResult: InternalMessage = {
+      id: 'tool-002',
+      role: 'tool',
+      name: 'bash',
+      content: 'legacy html string',
+      createdAt: new Date(),
+      toolCallId: 'call-001',
+      toolResult: 'file1.txt\nfile2.txt',
+      toolSuccess: true,
+    };
+
+    // Assistant message with thinking
+    const assistant: InternalMessage = {
+      id: 'assistant-001',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'The answer is 42.' }],
+      thinking: 'Let me think through this...',
+      createdAt: new Date(),
+    };
+
+    // Verify all structured data is present
+    expect(toolCall.toolCallId).toBe('call-001');
+    expect(toolCall.toolArguments).toBe('{"command": "ls -la"}');
+    expect(toolCall.toolResult).toBeUndefined();
+
+    expect(toolResult.toolCallId).toBe('call-001');
+    expect(toolResult.toolResult).toBe('file1.txt\nfile2.txt');
+    expect(toolResult.toolSuccess).toBe(true);
+
+    expect(assistant.thinking).toBe('Let me think through this...');
+  });
+});

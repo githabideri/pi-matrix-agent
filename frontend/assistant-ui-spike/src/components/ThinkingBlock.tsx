@@ -19,6 +19,7 @@ export function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
   const lines = content.split('\n');
   const previewLines = lines.slice(0, 3);
   const hasMore = lines.length > 3;
+  const preview = previewLines.join('\n') + (hasMore ? '\n...' : '');
   
   return (
     <div className="thinking-block">
@@ -36,12 +37,17 @@ export function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
         </span>
       </button>
       
-      <div className={`thinking-content ${isExpanded ? 'expanded' : ''}`}>
-        <pre className="thinking-text">
-          {isExpanded ? content : previewLines.join('\n')}
-          {hasMore && !isExpanded && '\n...'}
-        </pre>
+      {/* Preview always visible */}
+      <div className="thinking-preview">
+        <pre className="thinking-text">{preview}</pre>
       </div>
+      
+      {/* Full content only when expanded */}
+      {isExpanded && (
+        <div className="thinking-content expanded">
+          <pre className="thinking-text">{content}</pre>
+        </div>
+      )}
     </div>
   );
 }

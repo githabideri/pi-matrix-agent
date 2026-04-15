@@ -352,6 +352,15 @@ body {
   width: 100%;
 }
 
+/* Custom viewport for manual scroll control */
+.custom-viewport {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+}
+
 /* ============================================
    Thread Overrides (assistant-ui)
    ============================================ */
@@ -574,6 +583,19 @@ body {
   flex: 1;
 }
 
+/* Preview always visible */
+.thinking-preview {
+  padding: var(--space-md);
+  padding-top: 0;
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.thinking-preview .thinking-text {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Full content only when expanded */
 .thinking-content {
   max-height: 0;
   overflow: hidden;
@@ -583,11 +605,13 @@ body {
 .thinking-content.expanded {
   max-height: 500px;
   overflow-y: auto;
+  padding: var(--space-md);
+  padding-top: 0;
+  border-top: 1px solid var(--color-border-primary);
 }
 
 .thinking-text {
   margin: 0;
-  padding: var(--space-md);
   font-family: var(--font-family-mono);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);

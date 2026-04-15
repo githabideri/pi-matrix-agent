@@ -38,6 +38,11 @@ export interface InternalMessage {
   name?: string;
   thinking?: string;  // Separate thinking/reasoning content
   isStreaming?: boolean;  // Track if message is still being streamed
+  // Tool call/result structured data
+  toolCallId?: string;
+  toolArguments?: string;
+  toolResult?: string;
+  toolSuccess?: boolean;
 }
 
 /**
@@ -101,6 +106,8 @@ export function transcriptItemToMessage(item: TranscriptItem): InternalMessage {
         name: item.toolName,
         content: `\n<span class="tool-call">\n  <strong>Tool Call:</strong> ${item.toolName}\n  ${item.toolCallId ? `(${item.toolCallId})` : ''}\n</span>`.trim(),
         createdAt,
+        toolCallId: item.toolCallId,
+        toolArguments: item.arguments,
       };
 
     case 'tool_end': {
@@ -111,6 +118,9 @@ export function transcriptItemToMessage(item: TranscriptItem): InternalMessage {
         name: item.toolName,
         content: `\n<span class="tool-result">\n  <strong>Result:</strong> ${item.toolName} ${successIcon}\n</span>`.trim(),
         createdAt,
+        toolCallId: item.toolCallId,
+        toolResult: item.result,
+        toolSuccess: item.success,
       };
     }
 
@@ -298,6 +308,8 @@ export function processEvent(
         name: event.toolName,
         content: `\n<span class="tool-call">\n  <strong>Tool Call:</strong> ${event.toolName}\n</span>`.trim(),
         createdAt: new Date(event.timestamp),
+        toolCallId: event.toolCallId,
+        toolArguments: event.arguments,
       };
 
       return {
@@ -318,6 +330,9 @@ export function processEvent(
         name: event.toolName,
         content: `\n<span class="tool-result">\n  <strong>Result:</strong> ${event.toolName} ${successIcon}\n</span>`.trim(),
         createdAt: new Date(event.timestamp),
+        toolCallId: event.toolCallId,
+        toolResult: event.result,
+        toolSuccess: event.success,
       };
 
       return {

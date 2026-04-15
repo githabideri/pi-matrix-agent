@@ -115,52 +115,38 @@ function normalizeAssistantMessage(msg: InternalMessage): ThreadMessageLike {
 
 /**
  * Normalize tool start/end messages to tool-call parts.
+ * Uses structured data from InternalMessage, no regex parsing.
  */
 function normalizeToolMessage(msg: InternalMessage): ThreadMessageLike {
-  const text = typeof msg.content === 'string' ? msg.content : '';
-  
-  // Parse legacy tool call format
-  if (text.includes('Tool Call:')) {
-    const match = text.match(/Tool Call:\s*(.+?)(?:\n|$)/s);
-    if (match) {
-      const toolName = match[1].trim().replace(/<[^>]*>/g, '');
-      return {
-        role: 'assistant' as const,
-        content: [{
-          type: 'tool-call',
-          toolCallId: msg.id,
-          toolName,
-          argsText: '',
-        }],
-        id: msg.id,
-        createdAt: msg.createdAt,
-      };
+  // Use structured tool data from InternalMessage
+  if (msg.toolCallId !== undefined) {
+    const toolCallPart: any = {
+      type: 'tool-call',
+      toolCallId: msg.toolCallId,
+      toolName: msg.name,
+    };
+
+    // Add arguments if present (tool call)
+    if (msg.toolArguments !== undefined) {
+      toolCallPart.argsText = msg.toolArguments;
     }
-  }
-  
-  // Parse legacy tool result format
-  if (text.includes('Result:')) {
-    const match = text.match(/Result:\s*(\S+)\s*(\S)/s);
-    if (match) {
-      const toolName = match[1];
-      const success = match[2] === '✓';
-      return {
-        role: 'assistant' as const,
-        content: [{
-          type: 'tool-call',
-          toolCallId: msg.id,
-          toolName,
-          argsText: '',
-          result: success ? 'Success' : 'Failed',
-          isError: !success,
-        }],
-        id: msg.id,
-        createdAt: msg.createdAt,
-      };
+
+    // Add result if present (tool result)
+    if (msg.toolResult !== undefined) {
+      toolCallPart.result = msg.toolResult;
+      toolCallPart.isError = !msg.toolSuccess;
     }
+
+    return {
+      role: 'assistant' as const,
+      content: [toolCallPart],
+      id: msg.id,
+      createdAt: msg.createdAt,
+    };
   }
   
   // Fallback: render as assistant text message
+  const text = typeof msg.content === 'string' ? msg.content : '';
   return {
     role: 'assistant' as const,
     content: [{ type: 'text', text }],
