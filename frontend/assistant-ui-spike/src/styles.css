@@ -261,6 +261,21 @@ body {
   font-family: var(--font-family-mono);
 }
 
+.app-build-info {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  padding: var(--space-1xs) var(--space-xs);
+  background: var(--color-surface-primary);
+  border-radius: var(--radius-sm);
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+}
+
+.app-build-info:hover {
+  opacity: 1;
+}
+
 .app-main {
   flex: 1;
   overflow: hidden;

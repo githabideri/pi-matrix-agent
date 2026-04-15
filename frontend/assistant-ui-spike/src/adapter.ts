@@ -54,6 +54,8 @@ export interface AdapterState {
   messages: InternalMessage[];
   isProcessing: boolean;
   activeToolCalls: Map<string, ToolCallState>;
+  // Track pending user messages for deduplication
+  pendingUserMessages?: Set<string>;  // Set of prompt texts awaiting server confirmation
 }
 
 /**
@@ -160,6 +162,58 @@ export function findLastMessageByRole(
 }
 
 /**
+ * Add an optimistic user message for web UI submissions.
+ * Returns the newly created message ID for tracking.
+ */
+export function addOptimisticUserMessage(
+  state: AdapterState,
+  promptText: string
+): { state: AdapterState; messageId: string } {
+  const messageId = generateId();
+  
+  // Add to pending messages for deduplication
+  const newPendingUserMessages = new Set(state.pendingUserMessages || []);
+  newPendingUserMessages.add(promptText);
+
+  const userMessage: InternalMessage = {
+    id: messageId,
+    role: 'user',
+    content: [{ type: 'text' as const, text: promptText }],
+    createdAt: new Date(),
+  };
+
+  return {
+    state: {
+      ...state,
+      messages: [...state.messages, userMessage],
+      pendingUserMessages: newPendingUserMessages,
+    },
+    messageId,
+  };
+}
+
+/**
+ * Check if a user message text is already in the messages list.
+ * Used for deduplication when transcript is reloaded.
+ */
+export function findUserMessageByText(
+  messages: InternalMessage[],
+  text: string
+): InternalMessage | null {
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      const msgText = typeof msg.content === 'string' 
+        ? msg.content 
+        : msg.content.filter(c => c.type === 'text').map(c => c.text).join('');
+      if (msgText === text) {
+        return msg;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Append text to the last text content of a message.
  */
 export function appendTextToMessage(message: InternalMessage, text: string): InternalMessage {
@@ -223,6 +277,44 @@ export function processEvent(
 
     case 'turn_start': {
       if (event.promptPreview) {
+        // Check for duplicate - if we already have a user message with this text,
+        // or if it's in pendingUserMessages, skip adding it
+        // Strip [WebUI] prefix for comparison since optimistic update uses trimmed text
+        // Note: '[WebUI] ' is 8 chars, so we slice from index 8 (or use substring(8))
+        const promptForComparison = event.promptPreview.startsWith('[WebUI] ') 
+          ? event.promptPreview.substring(8) 
+          : event.promptPreview;
+        const existingMessage = findUserMessageByText(state.messages, promptForComparison);
+        const isPending = state.pendingUserMessages?.has(promptForComparison) || false;
+        
+        if (!existingMessage && !isPending) {
+          const userMessage: InternalMessage = {
+            id: generateId(),
+            role: 'user',
+            content: [{ type: 'text' as const, text: event.promptPreview }],
+            createdAt: new Date(event.timestamp),
+          };
+          return {
+            ...state,
+            messages: [...state.messages, userMessage],
+            isProcessing: true,
+          };
+        }
+      }
+      return { ...state, isProcessing: true };
+    }
+
+    case 'user_message': {
+      // Handle user_message event (for Matrix-originated messages where promptPreview
+      // wasn't available in turn_start)
+      // Strip [WebUI] prefix for comparison since optimistic update uses trimmed text
+      const promptForComparison = event.promptPreview.startsWith('[WebUI] ') 
+        ? event.promptPreview.substring(8) 
+        : event.promptPreview;
+      const existingMessage = findUserMessageByText(state.messages, promptForComparison);
+      const isPending = state.pendingUserMessages?.has(promptForComparison) || false;
+      
+      if (!existingMessage && !isPending) {
         const userMessage: InternalMessage = {
           id: generateId(),
           role: 'user',
@@ -232,10 +324,9 @@ export function processEvent(
         return {
           ...state,
           messages: [...state.messages, userMessage],
-          isProcessing: true,
         };
       }
-      return { ...state, isProcessing: true };
+      return state;
     }
 
     case 'message_update': {

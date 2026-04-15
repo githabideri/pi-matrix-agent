@@ -633,6 +633,190 @@ describe('Reasoning Preview', () => {
   });
 });
 
+describe('User Message Event (Matrix-originated)', () => {
+  it('adds user message from user_message event', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+    };
+
+    const event: WebUIEvent = {
+      type: 'user_message',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: 'Hello from Matrix!',
+    };
+
+    const newState = processEvent(state, event);
+
+    expect(newState.messages).toHaveLength(1);
+    expect(newState.messages[0].role).toBe('user');
+    expect((newState.messages[0].content[0] as any).text).toBe('Hello from Matrix!');
+  });
+
+  it('does not duplicate user message if already in messages list', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'msg-001',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello from Matrix!' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+    };
+
+    const event: WebUIEvent = {
+      type: 'user_message',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: 'Hello from Matrix!',
+    };
+
+    const newState = processEvent(state, event);
+
+    expect(newState.messages).toHaveLength(1); // No duplicate
+    expect((newState.messages[0].content[0] as any).text).toBe('Hello from Matrix!');
+  });
+
+  it('strips [WebUI] prefix for pendingUserMessages comparison', () => {
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Test message']),
+    };
+
+    const event: WebUIEvent = {
+      type: 'user_message',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Test message',
+    };
+
+    const newState = processEvent(state, event);
+
+    expect(newState.messages).toHaveLength(0); // No duplicate
+  });
+});
+
+describe('Optimistic User Message Deduplication', () => {
+  it('does not duplicate user message when turn_start arrives after optimistic update', () => {
+    // Initial state with optimistic user message (trimmed text, no [WebUI] prefix)
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [
+        {
+          id: 'optimistic-001',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello, world!' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Hello, world!']),
+    };
+
+    // turn_start event arrives with [WebUI] prefixed promptPreview
+    const event: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Hello, world!',
+    };
+
+    const newState = processEvent(state, event);
+
+    // Should still have only one user message (no duplicate)
+    expect(newState.messages).toHaveLength(1);
+    expect(newState.messages[0].role).toBe('user');
+    expect((newState.messages[0].content[0] as any).text).toBe('Hello, world!');
+    expect(newState.isProcessing).toBe(true);
+  });
+
+  it('adds user message when turn_start arrives without prior optimistic update', () => {
+    // Initial state without optimistic message (Matrix-originated message)
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+    };
+
+    // turn_start event arrives
+    const event: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: 'Hello from Matrix!',
+    };
+
+    const newState = processEvent(state, event);
+
+    // Should add the user message
+    expect(newState.messages).toHaveLength(1);
+    expect(newState.messages[0].role).toBe('user');
+    expect((newState.messages[0].content[0] as any).text).toBe('Hello from Matrix!');
+    expect(newState.isProcessing).toBe(true);
+  });
+
+  it('strips [WebUI] prefix for pendingUserMessages comparison', () => {
+    // Initial state with pending message (trimmed text)
+    const state: AdapterState = {
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+      pendingUserMessages: new Set(['Test message']),
+    };
+
+    // turn_start event with [WebUI] prefix
+    const event: WebUIEvent = {
+      type: 'turn_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      promptPreview: '[WebUI] Test message',
+    };
+
+    const newState = processEvent(state, event);
+
+    // Should not add duplicate - prefix should be stripped for comparison
+    expect(newState.messages).toHaveLength(0);
+    expect(newState.isProcessing).toBe(true);
+  });
+});
+
 describe('Canonical Rendering Path', () => {
   it('InternalMessage contains all data needed for rendering without HTML parsing', () => {
     // Tool call message

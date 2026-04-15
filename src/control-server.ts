@@ -122,7 +122,9 @@ export class ControlServer {
     const spikeDistPath = path.join(__dirname, "../frontend/assistant-ui-spike/dist");
 
     // Serve spike index.html with room key from query param
+    console.log("[ControlServer] Setting up /spike route");
     this.app.get("/spike", async (_req: Request, res: Response) => {
+      console.log("[ControlServer] /spike route hit!");
       const fs = await import("fs/promises");
       const indexPath = path.join(spikeDistPath, "index.html");
 
@@ -134,6 +136,10 @@ export class ControlServer {
 
         // Update title
         html = html.replace(/<title>.*?<\/title>/, `<title>Assistant UI Spike</title>`);
+
+        // Inject build info for version marker
+        const buildInfoScript = `<script>window.BUILD_INFO = { commit: "${process.env.GIT_COMMIT || "unknown"}", time: "${process.env.BUILD_TIME || new Date().toISOString()}" };</script>`;
+        html = html.replace("</head>", `${buildInfoScript}</head>`);
 
         res.type("html").send(html);
       } catch (error) {

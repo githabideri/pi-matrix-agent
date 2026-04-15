@@ -70,6 +70,23 @@ export interface TurnStartEvent extends EventMetadata {
 }
 
 /**
+ * Emitted when a user message is received (for Matrix-originated messages
+ * where promptPreview wasn't available in turn_start).
+ */
+export interface UserMessageEvent extends EventMetadata {
+  type: "user_message";
+
+  /** Unique turn ID for this request/response cycle */
+  turnId: string;
+
+  /** Session ID this turn belongs to */
+  sessionId: string;
+
+  /** User prompt text (truncated for privacy) */
+  promptPreview: string;
+}
+
+/**
  * Emitted when content is appended to a message.
  * Maps from legacy `text_delta`.
  */
@@ -211,6 +228,7 @@ export interface ErrorEvent extends EventMetadata {
 export type WebUIEvent =
   | SessionConnectedEvent
   | TurnStartEvent
+  | UserMessageEvent
   | MessageUpdateEvent
   | ToolStartEvent
   | ToolEndEvent

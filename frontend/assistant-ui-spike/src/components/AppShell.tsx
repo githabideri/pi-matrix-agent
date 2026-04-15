@@ -17,6 +17,9 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
+// Build info - injected by build or defaults
+const BUILD_INFO = (window as any).BUILD_INFO || { commit: 'unknown', time: new Date().toISOString() };
+
 export function AppShell({ roomKey, sessionId, isProcessing, model, children }: AppShellProps) {
   return (
     <div className="app-shell">
@@ -29,6 +32,7 @@ export function AppShell({ roomKey, sessionId, isProcessing, model, children }: 
           {model && <ModelBadge model={model} />}
           <ProcessingIndicator isProcessing={isProcessing} />
           <span className="app-session-id">{sessionId}</span>
+          <span className="app-build-info" title={`Built: ${BUILD_INFO.time}`}>📦 {BUILD_INFO.commit?.slice(0, 7)}</span>
         </div>
       </header>
       

@@ -43,6 +43,7 @@ export interface ToolStartItem extends BaseTranscriptItem {
   kind: "tool_start";
   toolName: string;
   toolCallId?: string;
+  arguments?: string;
 }
 
 /**
@@ -166,13 +167,25 @@ function parseMessage(message: any, messageId: string, timestamp: string, includ
           timestamp,
         });
       } else if (message.role === "assistant") {
+        // Filter out leaked "thought" prefix from model output
+        const filteredText = filterLeakedThoughtText(item.text);
         items.push({
           kind: "assistant_message",
           id: messageId,
-          text: item.text,
+          text: filteredText,
           timestamp,
         });
       }
+    } else if (item.type === "toolCall" && item.name) {
+      // Extract tool call as separate item
+      items.push({
+        kind: "tool_start",
+        id: item.id || `${messageId}-tool-${items.length}`,
+        toolName: item.name,
+        toolCallId: item.id,
+        arguments: item.arguments ? JSON.stringify(item.arguments) : undefined,
+        timestamp,
+      });
     } else if (item.type === "thinking" && item.thinking && includeThinking) {
       items.push({
         kind: "thinking",
@@ -183,7 +196,37 @@ function parseMessage(message: any, messageId: string, timestamp: string, includ
     }
   }
 
+  // Handle toolResult role messages
+  if (message.role === "toolResult" && message.toolCallId) {
+    items.push({
+      kind: "tool_end",
+      id: `${messageId}-result`,
+      toolName: message.toolName || "unknown",
+      toolCallId: message.toolCallId,
+      success: !message.isError,
+      result: message.content?.[0]?.text || undefined,
+      timestamp,
+    });
+  }
+
   return items;
+}
+
+/**
+ * Filter leaked "thought" prefix and <channel|> markers from model output.
+ * These are internal model tokens that should not appear in the final output.
+ */
+function filterLeakedThoughtText(text: string): string {
+  // Remove "thought\n" prefix (case insensitive)
+  let filtered = text.replace(/^thought\n?/i, "");
+
+  // Remove <channel|> markers and anything before the first newline after them
+  filtered = filtered.replace(/<channel\|>/g, "");
+
+  // Trim leading whitespace that may result from removals
+  filtered = filtered.trimStart();
+
+  return filtered;
 }
 
 /**

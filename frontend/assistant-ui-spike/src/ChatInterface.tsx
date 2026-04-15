@@ -26,6 +26,7 @@ import { getLiveRoom, getTranscript, submitPrompt, createEventStream } from './a
 import {
   transcriptToMessages,
   processEvent,
+  addOptimisticUserMessage,
   type AdapterState,
   type InternalMessage,
 } from './adapter';
@@ -202,6 +203,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
       messages: [],
       isProcessing: false,
       activeToolCalls: new Map(),
+      pendingUserMessages: new Set(),
     });
   }
   const store = storeRef.current;
@@ -244,6 +246,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
           messages,
           isProcessing: room.isProcessing,
           activeToolCalls: new Map(),
+          pendingUserMessages: new Set(),
         });
         
         setRoomData({ model: room.model });
@@ -329,10 +332,15 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
           .join('');
       }
       
-      if (!text.trim()) return;
+      const trimmedText = text.trim();
+      if (!trimmedText) return;
+
+      // OPTIMISTIC UPDATE: Add user message immediately
+      const { state: updatedState } = addOptimisticUserMessage(store.getState(), trimmedText);
+      store.setState(updatedState);
 
       try {
-        await submitPrompt(roomKey, text.trim());
+        await submitPrompt(roomKey, trimmedText);
 
         // Mark as processing - response comes via SSE
         store.setState({
@@ -341,6 +349,8 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
         });
       } catch (err) {
         setError(`Failed to submit: ${(err as Error).message}`);
+        // Optionally remove optimistic message on error
+        // For now, leave it as a visual indicator something was attempted
       }
     },
     [roomKey, store]

@@ -107,6 +107,10 @@ export class WebUIEmitter {
         this.handleTurnStart(event);
         break;
 
+      case "message_start":
+        this.handleMessageStart(event);
+        break;
+
       case "turn_end":
         this.handleTurnEnd(event);
         break;
@@ -128,15 +132,37 @@ export class WebUIEmitter {
   private handleTurnStart(event: any): void {
     this.currentTurnId = generateTurnId();
 
+    // Extract prompt preview from user message content if available
+    const promptPreview = event.userMessage?.content?.slice?.(0, 50);
+
     this.emit({
       type: "turn_start",
       roomId: this.roomId,
       roomKey: this._roomKey,
       sessionId: this.sessionId,
       turnId: this.currentTurnId!,
-      promptPreview: event.userMessage?.content?.slice?.(0, 50),
+      promptPreview,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private handleMessageStart(event: any): void {
+    // Handle user message start - emit prompt content if available
+    // This captures user messages that weren't included in turn_start
+    const message = event.message;
+    if (message?.role === "user" && message.content) {
+      const promptPreview = message.content.slice(0, 50);
+      // Emit a user_message event with the prompt content
+      this.emit({
+        type: "user_message",
+        roomId: this.roomId,
+        roomKey: this._roomKey,
+        sessionId: this.sessionId,
+        turnId: this.currentTurnId!,
+        promptPreview,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   private handleTurnEnd(event: any): void {

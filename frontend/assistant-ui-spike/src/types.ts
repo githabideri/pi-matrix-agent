@@ -120,6 +120,7 @@ export interface PromptResponse {
 export type WebUIEvent =
   | SessionConnectedEvent
   | TurnStartEvent
+  | UserMessageEvent
   | MessageUpdateEvent
   | ToolStartEvent
   | ToolEndEvent
@@ -153,6 +154,16 @@ export interface TurnStartEvent extends EventMetadata {
   turnId: string;
   sessionId: string;
   promptPreview?: string;
+}
+
+/**
+ * User message event (for Matrix-originated messages where promptPreview wasn't in turn_start).
+ */
+export interface UserMessageEvent extends EventMetadata {
+  type: 'user_message';
+  turnId: string;
+  sessionId: string;
+  promptPreview: string;
 }
 
 /**
