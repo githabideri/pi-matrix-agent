@@ -21,7 +21,7 @@ export interface RouterOptions {
   controlUrl?: string; // Base URL for control server
   setTyping?: (roomId: string, typing: boolean) => Promise<void>;
   startTypingLoop?: (roomId: string) => NodeJS.Timeout;
-  stopTypingLoop?: (interval: NodeJS.Timeout) => void;
+  stopTypingLoop?: (roomId: string, interval: NodeJS.Timeout) => void;
   isRoomProcessing?: (roomId: string) => boolean;
 }
 
@@ -358,9 +358,9 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
         console.error(`Error processing prompt:`, error);
         await config.sink.reply(msg.roomId, msg.eventId, "Sorry, an error occurred while processing your request.");
       } finally {
-        // Stop typing indicator
+        // Stop typing indicator - explicitly send typing=false
         if (typingInterval && options.stopTypingLoop) {
-          options.stopTypingLoop(typingInterval);
+          options.stopTypingLoop(msg.roomId, typingInterval);
         }
       }
       return;

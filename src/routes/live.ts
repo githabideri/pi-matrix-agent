@@ -195,6 +195,15 @@ export function routeLive(
 
     const roomId = roomState.roomId;
 
+    // Preflight busy check: reject if room is already processing
+    if (roomState.isProcessing) {
+      console.log(`[PROMPT] Room ${roomKey} is already processing, rejecting with 409`);
+      return res.status(409).json({
+        error: "Room is currently processing another request",
+        retryAfter: 5, // Suggested retry delay in seconds
+      });
+    }
+
     console.log(`[PROMPT] Accepted prompt for room ${roomKey}, text: "${text.slice(0, 50)}..."`);
 
     // Mirror the prompt to Matrix with [WebUI] prefix

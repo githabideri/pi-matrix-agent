@@ -67,9 +67,16 @@ export class MatrixTransport implements ReplySink {
   }
 
   /**
-   * Stop typing feedback loop.
+   * Stop typing feedback loop and explicitly send typing=false.
+   * This ensures the typing indicator is turned off immediately after reply or error,
+   * not only when the homeserver timeout expires.
    */
-  stopTypingLoop(interval: NodeJS.Timeout): void {
+  stopTypingLoop(roomId: string, interval: NodeJS.Timeout): void {
+    // Explicitly send typing=false to turn off the indicator immediately
+    this.setTyping(roomId, false).catch((err) => {
+      console.debug(`[MatrixTransport] Error clearing typing for ${roomId}:`, err);
+    });
+    // Then clear the interval
     clearInterval(interval);
   }
 

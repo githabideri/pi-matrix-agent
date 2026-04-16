@@ -99,11 +99,19 @@ export class ControlServer {
         // Fix asset paths - change /assets/ to /app/assets/ since we serve from /app
         html = html.replace(/\/assets\//g, "/app/assets/");
 
-        // Inject roomKey before the closing head tag
-        html = html.replace("</head>", `<script>window.ROOM_KEY = "${roomKey}";</script></head>`);
+        // Inject roomKey before the closing head tag - use JSON.stringify for JS-safe encoding
+        // This prevents XSS by properly escaping special characters like quotes, backslashes, etc.
+        const escapedRoomKey = JSON.stringify(roomKey);
+        html = html.replace("</head>", `<script>window.ROOM_KEY = ${escapedRoomKey};</script></head>`);
 
-        // Update title
-        html = html.replace(/<title>.*?<\/title>/, `<title>Room: ${roomKey}</title>`);
+        // Update title - HTML-escape to prevent XSS
+        const htmlEscapedRoomKey = roomKey
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#x27;");
+        html = html.replace(/<title>.*?<\/title>/, `<title>Room: ${htmlEscapedRoomKey}</title>`);
 
         res.type("html").send(html);
       } catch (error) {

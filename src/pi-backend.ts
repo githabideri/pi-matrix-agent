@@ -248,6 +248,15 @@ export class PiSessionBackend {
     this.roomStateManager.clearProcessing(roomId);
   }
 
+  /**
+   * Track in-flight prompts for each room.
+   * Used to ensure cleanup happens exactly once when the underlying prompt settles,
+   * even if our timeout fires first.
+   * NOTE: The SDK does NOT support real in-flight prompt cancellation.
+   * The prompt() method returns Promise<void> with no way to cancel once started.
+   */
+  private inFlightPrompts = new Map<string, { promptPromise: Promise<void>; resolveCleanup: () => void }>();
+
   async prompt(roomId: string, text: string): Promise<string> {
     console.log(`[PiSessionBackend] prompt() called for room ${roomId}, text: "${text.slice(0, 50)}..."`);
 
@@ -267,19 +276,36 @@ export class PiSessionBackend {
     const timeoutMs = 5 * 60 * 1000; // 5 minutes
     let timeoutId: NodeJS.Timeout | null = null;
 
-    try {
-      // Collect the response text
-      let responseText = "";
+    // Collect the response text
+    let responseText = "";
 
-      // Subscribe to events to capture the response
-      const unsubscribe = session.subscribe((event) => {
-        if (event.type === "message_update") {
-          if (event.assistantMessageEvent.type === "text_delta") {
-            responseText += event.assistantMessageEvent.delta;
-          }
+    // Subscribe to events to capture the response
+    // NOTE: unsubscribe is defined in outer scope to ensure cleanup on all paths
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "message_update") {
+        if (event.assistantMessageEvent.type === "text_delta") {
+          responseText += event.assistantMessageEvent.delta;
         }
-      });
+      }
+    });
 
+    // Track cleanup resolution
+    let cleanupResolved = false;
+    const resolveCleanup = () => {
+      if (!cleanupResolved) {
+        cleanupResolved = true;
+        // Clear timeout if still pending
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        // ALWAYS clear processing state - this is critical for recovery
+        this.roomStateManager.clearProcessing(roomId);
+        console.log(`[PiSessionBackend] Cleared processing state for room ${roomId}`);
+      }
+    };
+
+    try {
       // Send the prompt with timeout protection
       const promptPromise = session.prompt(text);
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -291,34 +317,52 @@ export class PiSessionBackend {
         }, timeoutMs);
       });
 
-      await Promise.race([promptPromise, timeoutPromise]);
+      // Track in-flight prompt for cleanup
+      // NOTE: The SDK does NOT support real in-flight prompt cancellation.
+      // We must keep the room guarded as busy until the underlying prompt settles.
+      this.inFlightPrompts.set(roomId, { promptPromise, resolveCleanup });
 
-      // Clear timeout if it hasn't fired
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
+      try {
+        await Promise.race([promptPromise, timeoutPromise]);
+
+        // Normal completion path
+        console.log(
+          `[PiSessionBackend] Prompt completed normally for room ${roomId}, response length: ${responseText.length}`,
+        );
+        return responseText;
+      } catch (error) {
+        // Timeout or other error path
+        // Do NOT clear processing yet - the underlying prompt may still be running
+        // It will be cleared when the promptPromise settles (see finally below)
+        console.error(`[PiSessionBackend] Prompt failed for room ${roomId}:`, error);
+        throw error;
       }
-
+    } finally {
       // Update session file path (may have been created/updated)
       this.roomStateManager.updateSessionFile(roomId, session.sessionFile);
 
       // Clean up subscription
       unsubscribe();
 
-      console.log(`[PiSessionBackend] Prompt completed for room ${roomId}, response length: ${responseText.length}`);
-      return responseText;
-    } catch (error) {
-      console.error(`[PiSessionBackend] Error during prompt for room ${roomId}:`, error);
-      // Re-throw so router can handle the error
-      throw error;
-    } finally {
-      // Clear timeout if still pending
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      // If the underlying prompt is still running (timeout case), attach a finally handler
+      // to ensure cleanup happens exactly once when it settles.
+      // NOTE: The SDK does NOT support real in-flight prompt cancellation.
+      if (this.inFlightPrompts.has(roomId)) {
+        const inFlight = this.inFlightPrompts.get(roomId)!;
+        // Remove from tracking - we'll handle cleanup via the attached finally
+        this.inFlightPrompts.delete(roomId);
+
+        // Attach finally to ensure cleanup when the underlying prompt settles
+        // We use a catch to prevent unhandled promise rejections, then resolve cleanup
+        inFlight.promptPromise
+          .then(() => {
+            console.log(`[PiSessionBackend] Underlying prompt settled (success) for room ${roomId}`);
+          })
+          .catch((err) => {
+            console.log(`[PiSessionBackend] Underlying prompt settled (error) for room ${roomId}:`, err);
+          })
+          .finally(resolveCleanup);
       }
-      // ALWAYS clear processing state - this is critical for recovery
-      this.roomStateManager.clearProcessing(roomId);
-      console.log(`[PiSessionBackend] Cleared processing state for room ${roomId}`);
     }
   }
 
@@ -926,15 +970,59 @@ export class PiSessionBackend {
   /**
    * Clear the desired model override for a room.
    * After clearing, the room will fall back to the global default.
+   *
+   * If the room is live and idle, the active session is immediately switched
+   * back to the global default model.
    */
   async clearDesiredModel(roomId: string): Promise<ModelClearResult> {
     const previous = this.roomModelManager.clearDesiredModel(roomId);
 
+    // Get the room state to check if it's live and idle
+    const roomState = this.roomStateManager.get(roomId);
+
     if (previous) {
       console.log(`[PiSessionBackend] Cleared desired model for room ${roomId}: ${previous.desiredModel}`);
+
+      // If room is live and idle, immediately switch back to global default
+      let switchedToDefault = false;
+      if (roomState && !roomState.isProcessing) {
+        const globalDefault = this.roomModelManager.getGlobalDefault();
+        if (globalDefault) {
+          try {
+            console.log(`[PiSessionBackend] Switching room ${roomId} back to global default: ${globalDefault}`);
+            // Find the target model for the global default profile
+            const targetModel = this.findModelByProfile(globalDefault);
+            if (targetModel) {
+              const modelRegistry = roomState.session.modelRegistry;
+              if (modelRegistry.hasConfiguredAuth(targetModel)) {
+                // Acquire serialization mutex for the model switch operation
+                const releaseMutex = await this._acquireMutex();
+                try {
+                  await this.applyModelWithGlobalDefaultRestore(roomState.session, targetModel);
+                  // Update snapshot immediately
+                  this.updateSnapshotFromSession(roomState, roomState.session);
+                  switchedToDefault = true;
+                  console.log(`[PiSessionBackend] Switched room ${roomId} back to global default`);
+                } finally {
+                  releaseMutex();
+                }
+              } else {
+                console.warn(`[PiSessionBackend] No auth configured for global default model ${globalDefault}`);
+              }
+            } else {
+              console.warn(`[PiSessionBackend] Could not find model for global default profile ${globalDefault}`);
+            }
+          } catch (error: any) {
+            console.error(`[PiSessionBackend] Error switching room ${roomId} back to global default:`, error);
+          }
+        }
+      }
+
       return {
         success: true,
-        message: `Desired model cleared for this room. Will now use the global default model.`,
+        message: switchedToDefault
+          ? `Desired model cleared for this room. Switched back to global default model.`
+          : `Desired model cleared for this room. The global default will apply on next rehydrate/reset/new session.`,
         previousDesiredModel: previous.desiredModel,
       };
     } else {
@@ -1079,6 +1167,15 @@ export class PiSessionBackend {
   }
 
   async dispose(): Promise<void> {
+    // Clean up any remaining in-flight prompts
+    // These will have their finally handlers called when they settle
+    for (const [roomId, inFlight] of this.inFlightPrompts.entries()) {
+      console.log(`[PiSessionBackend] Disposing with in-flight prompt for room ${roomId}`);
+      // Ensure cleanup happens when the prompt settles
+      inFlight.promptPromise.finally(inFlight.resolveCleanup);
+    }
+    this.inFlightPrompts.clear();
+
     this.roomStateManager.disposeAll();
   }
 }

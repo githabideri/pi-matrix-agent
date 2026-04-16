@@ -76,7 +76,7 @@ async function main() {
         modelSwitcher: piBackend, // Enable model switching
         controlUrl: controlPublicUrl, // Use public URL for !control command
         startTypingLoop: (roomId) => transport.startTypingLoop(roomId),
-        stopTypingLoop: (interval) => transport.stopTypingLoop(interval),
+        stopTypingLoop: (roomId, interval) => transport.stopTypingLoop(roomId, interval),
         isRoomProcessing: (roomId) => piBackend.checkProcessingGuard(roomId) !== null,
       });
     } catch (error) {
