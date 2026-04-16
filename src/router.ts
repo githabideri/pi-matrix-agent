@@ -322,13 +322,16 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
 
           if (result.success) {
             const lines: string[] = [];
-            lines.push(`✓ Desired model cleared for this room`);
-            lines.push(`  ${result.message}`);
             if (result.previousDesiredModel) {
+              // Something was actually cleared
+              lines.push(`✓ Desired model cleared for this room`);
+              lines.push(`  ${result.message}`);
               lines.push(`  Previous desired: ${result.previousDesiredModel}`);
+            } else {
+              // No override was set - just show the truthful backend message
+              lines.push(`✓ ${result.message}`);
             }
             lines.push("");
-            lines.push("This room will now use the global default model.");
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           } else {

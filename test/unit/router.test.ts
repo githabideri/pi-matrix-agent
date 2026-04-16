@@ -500,9 +500,9 @@ describe("routeMessage model commands", () => {
   });
 });
 
-// Phase 2: Clear command router tests
+// Phase 2: Clear command router tests - truthful message preservation
 describe("routeMessage model clear command", () => {
-  it("clears desired model for !model --clear command", async () => {
+  it("clears desired model for !model --clear command with truthful immediate switch message", async () => {
     const replies: string[] = [];
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
@@ -515,9 +515,10 @@ describe("routeMessage model clear command", () => {
         throw new Error("SHOULD NOT BE CALLED");
       },
       async clearDesiredModel(_roomId) {
+        // Backend returns truthful message for immediate switch case
         return {
           success: true,
-          message: "Desired model cleared",
+          message: "Desired model cleared for this room. Switched back to global default model.",
           previousDesiredModel: "qwen27",
         };
       },
@@ -542,8 +543,110 @@ describe("routeMessage model clear command", () => {
 
     expect(replies.length).toBe(1);
     expect(replies[0]).toContain("✓");
-    expect(replies[0].toLowerCase()).toContain("cleared");
+    expect(replies[0]).toContain("Desired model cleared for this room");
+    expect(replies[0]).toContain("Switched back to global default model");
     expect(replies[0]).toContain("qwen27");
+    // Verify router does NOT add misleading unconditional "will now use" line
+    expect(replies[0]).not.toContain("This room will now use the global default model");
+  });
+
+  it("clears desired model for !model --clear with truthful deferred message", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async clearDesiredModel(_roomId) {
+        // Backend returns truthful message for deferred case (not live/idle)
+        return {
+          success: true,
+          message:
+            "Desired model cleared for this room. The global default will apply on next rehydrate/reset/new session.",
+          previousDesiredModel: "gemma4",
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!model --clear",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("✓");
+    expect(replies[0]).toContain("Desired model cleared for this room");
+    expect(replies[0]).toContain("The global default will apply on next rehydrate/reset/new session");
+    expect(replies[0]).toContain("gemma4");
+    // Verify router does NOT add misleading unconditional "will now use" line
+    expect(replies[0]).not.toContain("This room will now use the global default model");
+  });
+
+  it("clears desired model for !model --clear when no override was set", async () => {
+    const replies: string[] = [];
+    const sink: ReplySink = {
+      async reply(_roomId, _eventId, text) {
+        replies.push(text);
+      },
+    };
+
+    const backend: ModelBackend = {
+      async prompt() {
+        throw new Error("SHOULD NOT BE CALLED");
+      },
+      async clearDesiredModel(_roomId) {
+        // Backend returns truthful message when no override was set
+        return {
+          success: true,
+          message: "No room-specific desired model was set. Already using global default.",
+        };
+      },
+    };
+
+    const msg: IncomingMessage = {
+      roomId: "!room:example.org",
+      eventId: "$event",
+      sender: "@user:example.org",
+      body: "!model --clear",
+    };
+
+    await routeMessage(msg, {
+      config: {
+        allowedRoomIds: ["!room:example.org"],
+        allowedUserIds: ["@user:example.org"],
+        agent: backend as AgentBackend,
+        sink,
+      },
+      modelSwitcher: backend,
+    });
+
+    expect(replies.length).toBe(1);
+    expect(replies[0]).toContain("✓");
+    expect(replies[0]).toContain("No room-specific desired model was set");
+    expect(replies[0]).toContain("Already using global default");
+    // Verify router does NOT claim something was cleared (misleading header)
+    // The reply should NOT have "Desired model cleared for this room" as a separate line
+    const firstLine = replies[0].split("\n")[0];
+    expect(firstLine).not.toContain("Desired model cleared for this room");
+    // The first line should be the truthful message about no override being set
+    expect(firstLine).toContain("No room-specific desired model was set");
   });
 
   it("clears desired model for !m -c command (alias)", async () => {
@@ -561,7 +664,8 @@ describe("routeMessage model clear command", () => {
       async clearDesiredModel(_roomId) {
         return {
           success: true,
-          message: "No room-specific desired model was set",
+          message: "Desired model cleared for this room. Switched back to global default model.",
+          previousDesiredModel: "gemma4",
         };
       },
     };
@@ -585,7 +689,8 @@ describe("routeMessage model clear command", () => {
 
     expect(replies.length).toBe(1);
     expect(replies[0]).toContain("✓");
-    expect(replies[0].toLowerCase()).toContain("cleared");
+    expect(replies[0]).toContain("Desired model cleared for this room");
+    expect(replies[0]).toContain("gemma4");
   });
 
   it("help text includes --clear command", async () => {
