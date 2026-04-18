@@ -44,16 +44,6 @@ echo ""
 echo -e "${BLUE}Available Model Profiles:${NC}"
 echo ""
 
-# Gemma4 profile info
-GEMMA4_PROVIDER="llama-cpp-gemma4"
-GEMMA4_MODEL="gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
-GEMMA4_NAME="Gemma4 26B A4B"
-echo -e "  ${YELLOW}gemma4${NC}"
-echo -e "    Provider: $GEMMA4_PROVIDER"
-echo -e "    Model:    $GEMMA4_MODEL"
-echo -e "    Name:     $GEMMA4_NAME"
-echo ""
-
 # Qwen27 profile info
 QWEN27_PROVIDER="llama-cpp-qwen27"
 QWEN27_MODEL="Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf"
@@ -64,11 +54,21 @@ echo -e "    Model:    $QWEN27_MODEL"
 echo -e "    Name:     $QWEN27_NAME"
 echo ""
 
+# Qwen36 profile info
+QWEN36_PROVIDER="llama-cpp-qwen36"
+QWEN36_MODEL="Qwen3.6-35B-A3B-UD-Q4_K_S.gguf"
+QWEN36_NAME="Qwen3.6 35B A3B"
+echo -e "  ${YELLOW}qwen36${NC}"
+echo -e "    Provider: $QWEN36_PROVIDER"
+echo -e "    Model:    $QWEN36_MODEL"
+echo -e "    Name:     $QWEN36_NAME"
+echo ""
+
 # Show which profile is active
-if [[ "$DEFAULT_PROVIDER" == "$GEMMA4_PROVIDER" ]]; then
-    echo -e "${GREEN}✓ Active Profile: gemma4${NC}"
-elif [[ "$DEFAULT_PROVIDER" == "$QWEN27_PROVIDER" ]]; then
+if [[ "$DEFAULT_PROVIDER" == "$QWEN27_PROVIDER" ]]; then
     echo -e "${GREEN}✓ Active Profile: qwen27${NC}"
+elif [[ "$DEFAULT_PROVIDER" == "$QWEN36_PROVIDER" ]]; then
+    echo -e "${GREEN}✓ Active Profile: qwen36${NC}"
 else
     echo -e "${YELLOW}? Active Profile: unknown ($DEFAULT_PROVIDER)${NC}"
 fi
@@ -95,5 +95,5 @@ fi
 echo ""
 echo -e "${BLUE}========================================${NC}"
 echo ""
-echo "To switch models, use: ./scripts/model-switch.sh <gemma4|qwen27>"
+echo "To switch models, use: ./scripts/model-switch.sh <qwen27|qwen36>"
 echo ""

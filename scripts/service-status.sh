@@ -207,19 +207,19 @@ check_model_config() {
         fi
         
         # Determine profile name
-        if [[ "$DEFAULT_PROVIDER" == *"gemma4"* ]]; then
-            print_info "  Profile:        gemma4"
-            print_info "  Model Name:     Gemma4 26B A4B"
-        elif [[ "$DEFAULT_PROVIDER" == *"qwen"* ]]; then
+        if [[ "$DEFAULT_PROVIDER" == *"qwen27"* ]]; then
             print_info "  Profile:        qwen27"
             print_info "  Model Name:     Qwen3.5 27B Opus"
+        elif [[ "$DEFAULT_PROVIDER" == *"qwen36"* ]]; then
+            print_info "  Profile:        qwen36"
+            print_info "  Model Name:     Qwen3.6 35B A3B"
         fi
     else
         print_error "Settings file NOT found: $SETTINGS_FILE"
     fi
     
     print_info ""
-    print_info "  To switch models: sudo ./scripts/model-switch.sh <gemma4|qwen27>"
+    print_info "  To switch models: sudo ./scripts/model-switch.sh <qwen27|qwen36>"
     print_info "  To view status:   ./scripts/model-status.sh"
 }
 

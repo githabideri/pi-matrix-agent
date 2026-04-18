@@ -28,8 +28,8 @@ sudo journalctl -u pi-matrix-agent -f
 ./scripts/model-status.sh
 
 # Switch models (requires restart)
-sudo ./scripts/model-switch.sh gemma4   # Gemma4 26B A4B
 sudo ./scripts/model-switch.sh qwen27   # Qwen3.5 27B Opus
+sudo ./scripts/model-switch.sh qwen36   # Qwen3.6 35B A3B
 ```
 
 ### Development (Manual)
@@ -89,8 +89,8 @@ The pi-matrix-agent supports switching between two model profiles:
 
 | Profile | Model | Provider | Endpoint |
 |---------|-------|----------|----------|
-| `gemma4` | Gemma4 26B A4B | llama-cpp-gemma4 | 192.168.0.27:8081 |
 | `qwen27` | Qwen3.5 27B Opus | llama-cpp-qwen27 | 192.168.0.27:8080 |
+| `qwen36` | Qwen3.6 35B A3B | llama-cpp-qwen36 | 192.168.0.27:8081 |
 
 ### Key Design Decisions
 
@@ -124,23 +124,23 @@ This is **separate** from your normal Pi CLI config at `~/.pi/agent/`.
 
 Example output:
 ```
-Current Default Provider: llama-cpp-gemma4
-Current Default Model ID: gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
-Model Display Name:       Gemma4 26B A4B (Matrix Bot)
+Current Default Provider: llama-cpp-qwen27
+Current Default Model ID: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
+Model Display Name:       Qwen3.5 27B Opus (Matrix Bot)
 
 Available Model Profiles:
-
-  gemma4
-    Provider: llama-cpp-gemma4
-    Model:    gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
-    Name:     Gemma4 26B A4B
 
   qwen27
     Provider: llama-cpp-qwen27
     Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
     Name:     Qwen3.5 27B Opus
 
-✓ Active Profile: gemma4
+  qwen36
+    Provider: llama-cpp-qwen36
+    Model:    Qwen3.6-35B-A3B-UD-Q4_K_S.gguf
+    Name:     Qwen3.6 35B A3B
+
+✓ Active Profile: qwen27
 ```
 
 ---
@@ -148,11 +148,11 @@ Available Model Profiles:
 ### Switching Models
 
 ```bash
-# Switch to Gemma4
-sudo ./scripts/model-switch.sh gemma4
-
 # Switch to Qwen27
 sudo ./scripts/model-switch.sh qwen27
+
+# Switch to Qwen36
+sudo ./scripts/model-switch.sh qwen36
 ```
 
 ### What the Switch Script Does
@@ -170,27 +170,27 @@ sudo ./scripts/model-switch.sh qwen27
 ### Example Switch Session
 
 ```bash
-$ sudo ./scripts/model-switch.sh qwen27
+$ sudo ./scripts/model-switch.sh qwen36
 
 ========================================
    PI-MATRIX-AGENT MODEL SWITCH
 ========================================
 
 Current Configuration:
-  Provider: llama-cpp-gemma4
-  Model:    gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
-
-Target Configuration (qwen27):
   Provider: llama-cpp-qwen27
   Model:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
-  Name:     Qwen3.5 27B Opus
+
+Target Configuration (qwen36):
+  Provider: llama-cpp-qwen36
+  Model:    Qwen3.6-35B-A3B-UD-Q4_K_S.gguf
+  Name:     Qwen3.6 35B A3B
 
 Creating backup of current settings...
   Backup: /root/.pi-matrix-agent/agent/settings.json.backup.20260414_123456
 
 Updating settings.json...
-  defaultProvider: llama-cpp-qwen27
-  defaultModel:    Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf
+  defaultProvider: llama-cpp-qwen36
+  defaultModel:    Qwen3.6-35B-A3B-UD-Q4_K_S.gguf
 
 ✓ Settings updated and verified
 
@@ -207,7 +207,7 @@ Starting pi-matrix-agent...
 Switch complete!
 ========================================
 
-Now using: qwen27 (Qwen3.5 27B Opus)
+Now using: qwen36 (Qwen3.6 35B A3B)
 
 To verify, run:
   ./scripts/model-switch.sh --status
@@ -222,7 +222,7 @@ Service Status: active
 ./scripts/model-switch.sh --help
 
 # Dry run (show what would change without applying)
-sudo ./scripts/model-switch.sh --dry-run gemma4
+sudo ./scripts/model-switch.sh --dry-run qwen27
 
 # Show current status (alias for model-status.sh)
 ./scripts/model-switch.sh --status
@@ -260,20 +260,6 @@ sudo ./scripts/model-switch.sh --dry-run gemma4
 ```json
 {
   "providers": {
-    "llama-cpp-gemma4": {
-      "baseUrl": "http://192.168.0.27:8081/v1",
-      "api": "openai-completions",
-      "apiKey": "sk-openclaw",
-      "models": [
-        {
-          "id": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
-          "name": "Gemma4 26B A4B (Matrix Bot)",
-          "reasoning": true,
-          "contextWindow": 131072,
-          "maxTokens": 16384
-        }
-      ]
-    },
     "llama-cpp-qwen27": {
       "baseUrl": "http://192.168.0.27:8080/v1",
       "api": "openai-completions",
@@ -287,6 +273,20 @@ sudo ./scripts/model-switch.sh --dry-run gemma4
           "maxTokens": 65536
         }
       ]
+    },
+    "llama-cpp-qwen36": {
+      "baseUrl": "http://192.168.0.27:8081/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-openclaw",
+      "models": [
+        {
+          "id": "Qwen3.6-35B-A3B-UD-Q4_K_S.gguf",
+          "name": "Qwen3.6 35B A3B (Matrix Bot)",
+          "reasoning": true,
+          "contextWindow": 204800,
+          "maxTokens": 65536
+        }
+      ]
     }
   }
 }
@@ -295,8 +295,8 @@ sudo ./scripts/model-switch.sh --dry-run gemma4
 **settings.json** (`/root/.pi-matrix-agent/agent/settings.json`):
 ```json
 {
-  "defaultProvider": "llama-cpp-gemma4",
-  "defaultModel": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+  "defaultProvider": "llama-cpp-qwen27",
+  "defaultModel": "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf",
   "defaultThinkingLevel": "medium"
 }
 ```
