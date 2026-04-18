@@ -8,7 +8,7 @@
     "format": "biome format --write .",
     "lint": "biome lint .",
     "fix": "biome check --write .",
-    "check": "biome check --write --error-on-warnings . && tsc --noEmit",
+    "check": "biome check --error-on-warnings . && tsc --noEmit",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run",

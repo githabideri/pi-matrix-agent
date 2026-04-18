@@ -39,10 +39,10 @@ The repo has a CI workflow that runs on every push to `main` and pull request:
 **Run locally:**
 
 ```bash
-# Run the same checks as CI (with npm cache, faster)
+# Fast local convenience (skips install, uses npm cache)
 npm run ci:local
 
-# Or run a fresh install (slower, simulates CI exactly)
+# Full fresh-install equivalent (simulates CI exactly)
 ./scripts/ci-local.sh
 ```
 
@@ -193,7 +193,7 @@ This repository uses three remotes:
 
 | Remote | Purpose |
 |--------|--------|
-| `origin` | Primary remote (usually GitHub) |
+| `origin` | Primary remote |
 | `github` | Backup mirror on GitHub |
 | `codeberg` | Backup mirror on Codeberg |
 

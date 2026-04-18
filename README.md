@@ -314,10 +314,10 @@ The repository has a CI workflow that runs on every push to `main` and pull requ
 **Run CI checks locally:**
 
 ```bash
-# Run the same checks as CI (uses npm cache, faster)
+# Fast local convenience (skips install, uses npm cache)
 npm run ci:local
 
-# Or run a fresh install (slower, simulates CI exactly)
+# Full fresh-install equivalent (simulates CI exactly)
 ./scripts/ci-local.sh
 ```
 
