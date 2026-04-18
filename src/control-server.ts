@@ -1,4 +1,5 @@
-import express, { type Express, type Request, type Response } from "express";
+import { timingSafeEqual } from "crypto";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { Server } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,6 +15,7 @@ const __dirname = path.dirname(__filename);
 export interface ControlServerOptions {
   port?: number;
   host?: string;
+  auth?: { username: string; password: string };
 }
 
 export class ControlServer {
@@ -24,6 +26,7 @@ export class ControlServer {
   private sessionBaseDir: string;
   private port: number;
   private host: string;
+  private auth?: { username: string; password: string };
   private matrixTransport?: MatrixTransport;
   private activeConnections: Set<any> = new Set(); // Track active HTTP connections for graceful shutdown
 
@@ -39,6 +42,7 @@ export class ControlServer {
     this.sessionBaseDir = sessionBaseDir;
     this.port = options?.port ?? 9000;
     this.host = options?.host ?? "127.0.0.1";
+    this.auth = options?.auth;
     this.matrixTransport = matrixTransport;
 
     this.app = express();
@@ -57,8 +61,15 @@ export class ControlServer {
       next();
     });
 
-    // Serve static files
-    this.app.use("/static", express.static(path.join(__dirname, "../public")));
+    // Set up authentication middleware for protected routes
+    if (this.auth) {
+      console.log("[ControlServer] Authentication enabled for protected routes");
+    } else {
+      console.log("[ControlServer] Authentication disabled");
+    }
+
+    // Serve static files with auth protection
+    this.app.use("/static", this.requireAuth(), express.static(path.join(__dirname, "../public")));
 
     this.setupRoutes();
   }
@@ -67,26 +78,30 @@ export class ControlServer {
     // JSON parsing middleware
     this.app.use(express.json());
 
-    // Health check
+    // Health check (open, no auth required)
     this.app.get("/", (_req: Request, res: Response) => {
       res.json({ status: "ok", service: "pi-matrix-agent-control" });
     });
 
-    // Live room routes (JSON API)
-    this.app.use("/api/live/rooms", routeLive(this.piBackend, this.workingDirectory, this.matrixTransport));
+    // Live room routes (JSON API) - protected
+    this.app.use(
+      "/api/live/rooms",
+      this.requireAuth(),
+      routeLive(this.piBackend, this.workingDirectory, this.matrixTransport),
+    );
 
-    // Archive routes (JSON API)
-    this.app.use("/api/archive/rooms", routeArchive(this.piBackend, this.sessionBaseDir));
+    // Archive routes (JSON API) - protected
+    this.app.use("/api/archive/rooms", this.requireAuth(), routeArchive(this.piBackend, this.sessionBaseDir));
 
-    // WebUI routes (HTML pages - EJS fallback)
+    // WebUI routes (HTML pages - EJS fallback) - protected
     console.log("[ControlServer] Mounting WebUI routes at /room");
-    this.app.use("/room", routeWebUI(this.piBackend, this.workingDirectory, this.sessionBaseDir));
+    this.app.use("/room", this.requireAuth(), routeWebUI(this.piBackend, this.workingDirectory, this.sessionBaseDir));
 
-    // Preview frontend routes (/app/room/:roomKey)
+    // Preview frontend routes (/app/room/:roomKey) - protected
     console.log("[ControlServer] Mounting preview frontend at /app/room");
 
     // Preview room page - MUST come BEFORE static middleware
-    this.app.get("/app/room/:roomKey", async (req: Request, res: Response) => {
+    this.app.get("/app/room/:roomKey", this.requireAuth(), async (req: Request, res: Response) => {
       const roomKey = req.params.roomKey;
 
       // Read the built index.html and inject roomKey
@@ -120,17 +135,17 @@ export class ControlServer {
       }
     });
 
-    // Serve built frontend assets - comes AFTER room route
+    // Serve built frontend assets - comes AFTER room route - protected
     const frontendDistPath = path.join(__dirname, "../frontend/operator-ui/dist");
-    this.app.use("/app", express.static(frontendDistPath));
+    this.app.use("/app", this.requireAuth(), express.static(frontendDistPath));
 
-    // Assistant UI Spike routes (/spike)
+    // Assistant UI Spike routes (/spike) - protected
     console.log("[ControlServer] Mounting assistant-ui spike at /spike");
 
     const spikeDistPath = path.join(__dirname, "../frontend/assistant-ui-spike/dist");
 
-    // Serve spike index.html with room key from query param
-    this.app.get("/spike", async (_req: Request, res: Response) => {
+    // Serve spike index.html with room key from query param - protected
+    this.app.get("/spike", this.requireAuth(), async (_req: Request, res: Response) => {
       const fs = await import("fs/promises");
       const indexPath = path.join(spikeDistPath, "index.html");
 
@@ -154,8 +169,72 @@ export class ControlServer {
       }
     });
 
-    // Serve spike assets
-    this.app.use("/spike", express.static(spikeDistPath));
+    // Serve spike assets - protected
+    this.app.use("/spike", this.requireAuth(), express.static(spikeDistPath));
+  }
+
+  /**
+   * Constant-time string comparison to prevent timing attacks.
+   */
+  private constantTimeEqual(a: string, b: string): boolean {
+    try {
+      const bufA = Buffer.from(a, "utf-8");
+      const bufB = Buffer.from(b, "utf-8");
+      return timingSafeEqual(bufA, bufB);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Basic Auth middleware factory.
+   * If auth is not configured, allows request through.
+   * Otherwise requires valid Authorization: Basic header.
+   */
+  private requireAuth(): (req: Request, res: Response, next: NextFunction) => void {
+    return (req: Request, res: Response, next: NextFunction) => {
+      // If auth is not configured, allow through
+      if (!this.auth) {
+        return next();
+      }
+
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Basic ")) {
+        res.setHeader("WWW-Authenticate", 'Basic realm="pi-matrix-agent-control"');
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      // Decode Base64 safely
+      const encoded = authHeader.substring(6); // Remove "Basic " prefix
+      let decoded: string;
+      try {
+        decoded = Buffer.from(encoded, "base64").toString("utf-8");
+      } catch {
+        res.setHeader("WWW-Authenticate", 'Basic realm="pi-matrix-agent-control"');
+        return res.status(401).json({ error: "Invalid authorization header" });
+      }
+
+      // Parse username:password
+      const colonIndex = decoded.indexOf(":");
+      if (colonIndex === -1) {
+        res.setHeader("WWW-Authenticate", 'Basic realm="pi-matrix-agent-control"');
+        return res.status(401).json({ error: "Invalid authorization header" });
+      }
+
+      const username = decoded.substring(0, colonIndex);
+      const password = decoded.substring(colonIndex + 1);
+
+      // Constant-time comparison
+      if (
+        !this.constantTimeEqual(username, this.auth.username) ||
+        !this.constantTimeEqual(password, this.auth.password)
+      ) {
+        res.setHeader("WWW-Authenticate", 'Basic realm="pi-matrix-agent-control"');
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      next();
+    };
   }
 
   async start(): Promise<void> {

@@ -21,6 +21,9 @@ export interface Config {
   controlHost?: string;
   // Control public URL (fallback, env var takes precedence)
   controlPublicUrl?: string;
+  // Control server authentication (optional)
+  controlAuthUser?: string;
+  controlAuthPassword?: string;
 }
 
 export interface RuntimeConfig {
@@ -31,6 +34,7 @@ export interface RuntimeConfig {
   controlPublicUrl: string;
   frontendDistPath: string;
   frontendDistExists: boolean;
+  controlAuth?: ControlAuthConfig;
 }
 
 export function loadConfig(): Config {
@@ -94,6 +98,48 @@ export function getControlPublicUrl(config: any): string {
   }
   // Default placeholder - user should configure this
   return "http://localhost:9000";
+}
+
+export interface ControlAuthConfig {
+  username: string;
+  password: string;
+}
+
+/**
+ * Get control server authentication config from env or config.
+ * Resolution order: 1. CONTROL_AUTH_USER / CONTROL_AUTH_PASSWORD env vars, 2. config.controlAuthUser / config.controlAuthPassword
+ * Returns undefined if neither username nor password is set.
+ * Logs a warning and returns undefined if only one is set.
+ */
+export function getControlAuth(config: Config): ControlAuthConfig | undefined {
+  // 1. Env vars take precedence
+  const envUser = process.env.CONTROL_AUTH_USER;
+  const envPass = process.env.CONTROL_AUTH_PASSWORD;
+
+  // 2. Config file values
+  const configUser = config?.controlAuthUser;
+  const configPass = config?.controlAuthPassword;
+
+  // Use env vars if set, otherwise use config values
+  const username = envUser ?? configUser;
+  const password = envPass ?? configPass;
+
+  // If neither is set, auth is disabled
+  if (!username && !password) {
+    return undefined;
+  }
+
+  // If only one is set, log a warning and return undefined
+  if (!username || !password) {
+    console.warn(
+      "[Control Auth] Incomplete configuration: both username and password must be set. " +
+        "Auth is disabled. Set both CONTROL_AUTH_USER and CONTROL_AUTH_PASSWORD env vars, " +
+        "or both controlAuthUser and controlAuthPassword in config.json.",
+    );
+    return undefined;
+  }
+
+  return { username, password };
 }
 
 /**
@@ -183,6 +229,7 @@ export function printRuntimeConfig(
   controlPort: number,
   controlHost: string,
   controlPublicUrl: string,
+  controlAuth?: ControlAuthConfig,
 ): void {
   const frontendDistPath = "./frontend/operator-ui/dist";
   const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);
@@ -205,6 +252,7 @@ export function printRuntimeConfig(
   console.log(`Control port:       ${controlPort}`);
   console.log(`Control URL:        http://${controlHost}:${controlPort}`);
   console.log(`Control public URL: ${controlPublicUrl}`);
+  console.log(`Control auth:       ${controlAuth ? "enabled" : "disabled"}`);
   console.log(`------------------------------------------------------`);
   console.log(`Frontend dist:      ${frontendDistPath}`);
   console.log(`Frontend built:     ${frontendDistExists ? "yes" : "no"}`);
@@ -220,6 +268,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
   const controlPort = getControlPort(config);
   const controlHost = getControlHost(config);
   const controlPublicUrl = getControlPublicUrl(config);
+  const controlAuth = getControlAuth(config);
   const frontendDistPath = "./frontend/operator-ui/dist";
   const frontendDistExists = existsSync(frontendDistPath) && existsSync(`${frontendDistPath}/index.html`);
 
@@ -229,6 +278,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
     controlPort,
     controlHost,
     controlPublicUrl,
+    controlAuth,
     frontendDistPath,
     frontendDistExists,
   };

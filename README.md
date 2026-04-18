@@ -190,7 +190,9 @@ Create `config.json`:
   "sessionBaseDir": "./sessions",
   "workingDirectory": "/path/to/working/dir",
   "agentDir": "/path/to/agent/dir",
-  "controlPublicUrl": "https://your-tailscale-serve-url"
+  "controlPublicUrl": "https://your-tailscale-serve-url",
+  "controlAuthUser": "your-username",
+  "controlAuthPassword": "your-password"
 }
 ```
 
@@ -199,6 +201,56 @@ Key fields:
 - `sessionBaseDir`: Directory for per-room session files
 - `workingDirectory`: Working directory for tool operations
 - `controlPublicUrl`: Tailscale Serve URL for `!control` command (optional - can also use `CONTROL_PUBLIC_URL` env var)
+- `controlAuthUser`: Username for control-plane HTTP Basic Auth (optional)
+- `controlAuthPassword`: Password for control-plane HTTP Basic Auth (optional)
+
+### Control-Plane Authentication
+
+HTTP Basic Auth can be optionally enabled for the control-plane API and WebUI routes. The health check route (`/`) remains open for local health checks.
+
+**Configuration methods (in order of precedence):**
+
+1. **Environment variables (preferred for secrets):**
+   - `CONTROL_AUTH_USER`: Username for authentication
+   - `CONTROL_AUTH_PASSWORD`: Password for authentication
+
+2. **Config file:**
+   - `controlAuthUser`: Username for authentication
+   - `controlAuthPassword`: Password for authentication
+
+**Behavior:**
+- Environment variables take precedence over config file values
+- Both username and password must be set for authentication to be enabled
+- If only one is set, a warning is logged and auth is disabled
+- If neither is set, auth is disabled (default behavior)
+- The `/` health check route remains open
+- Protected routes: `/api`, `/room`, `/app`, `/spike`, `/static`
+
+**Example with environment variables:**
+
+```bash
+CONTROL_AUTH_USER="admin" CONTROL_AUTH_PASSWORD="secret123" ./scripts/run-bot.sh
+```
+
+**Example with config file:**
+
+```json
+{
+  "controlAuthUser": "admin",
+  "controlAuthPassword": "secret123"
+}
+```
+
+**Verification:**
+
+```bash
+# Health check (no auth required)
+curl http://127.0.0.1:9000/
+
+# API route (requires auth)
+curl http://127.0.0.1:9000/api/live/rooms           # Returns 401
+curl -u admin:secret123 http://127.0.0.1:9000/api/live/rooms  # Works
+```
 
 ### Running
 

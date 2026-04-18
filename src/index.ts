@@ -30,7 +30,7 @@ async function main() {
   validateRuntime(config);
 
   // Print effective runtime config
-  printRuntimeConfig(config, runtime.controlPort, runtime.controlHost, runtime.controlPublicUrl);
+  printRuntimeConfig(config, runtime.controlPort, runtime.controlHost, runtime.controlPublicUrl, runtime.controlAuth);
 
   // Create pi session backend (stateful, per-room sessions)
   const piBackend = new PiSessionBackend({
@@ -56,6 +56,7 @@ async function main() {
     {
       port: runtime.controlPort,
       host: runtime.controlHost,
+      auth: runtime.controlAuth,
     },
     transport, // Pass matrix transport for syncing web UI messages
   );
