@@ -299,6 +299,28 @@ sudo tailscale serve --bg localhost:9000
 
 ## Verification
 
+### CI Workflow
+
+The repository has a CI workflow that runs on every push to `main` and pull request:
+
+- **Triggers:** Push to `main`, pull requests targeting `main`
+- **Node version:** 20
+- **Steps:**
+  1. Install dependencies (`npm ci`)
+  2. Run tests (`npm test`)
+  3. Run type check and lint (`npm run check`)
+  4. Build (`npm run build`)
+
+**Run CI checks locally:**
+
+```bash
+# Run the same checks as CI (uses npm cache, faster)
+npm run ci:local
+
+# Or run a fresh install (slower, simulates CI exactly)
+./scripts/ci-local.sh
+```
+
 ### Local Verification (No Matrix Required)
 
 ```bash

@@ -24,6 +24,28 @@ npm run build
 npm run verify
 ```
 
+### CI Workflow
+
+The repo has a CI workflow that runs on every push to `main` and pull request:
+
+- **Triggers:** Push to `main`, pull requests targeting `main`
+- **Node version:** 20
+- **Steps:**
+  1. Install dependencies (`npm ci`)
+  2. Run tests (`npm test`)
+  3. Run type check and lint (`npm run check`)
+  4. Build (`npm run build`)
+
+**Run locally:**
+
+```bash
+# Run the same checks as CI (with npm cache, faster)
+npm run ci:local
+
+# Or run a fresh install (slower, simulates CI exactly)
+./scripts/ci-local.sh
+```
+
 ---
 
 ## Local Development vs Systemd Service
