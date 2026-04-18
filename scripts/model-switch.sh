@@ -6,10 +6,10 @@
 #
 # For room-level model switching, use the Matrix commands:
 #   !model          - Show current model status
-#   !model gemma4   - Switch to Gemma4
 #   !model qwen27   - Switch to Qwen27
-#   !m g4           - Switch to Gemma4 (alias)
+#   !model qwen36   - Switch to Qwen36 (primary)
 #   !m q27          - Switch to Qwen27 (alias)
+#   !m q36          - Switch to Qwen36 (alias)
 #
 # This shell script is primarily for:
 #   - Setting the default model for brand-new rooms
@@ -17,8 +17,8 @@
 #   - Batch configuration changes
 #
 # Usage:
-#   ./scripts/model-switch.sh gemma4
 #   ./scripts/model-switch.sh qwen27
+#   ./scripts/model-switch.sh qwen36
 #   ./scripts/model-switch.sh --status
 
 set -e
@@ -32,12 +32,12 @@ SESSION_BASE_DIR="/root/homelab/sessions/pi-matrix"
 
 # Profile definitions
 declare -A PROFILES
-PROFILES[gemma4_provider]="llama-cpp-gemma4"
-PROFILES[gemma4_model]="gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
-PROFILES[gemma4_name]="Gemma4 26B A4B"
 PROFILES[qwen27_provider]="llama-cpp-qwen27"
 PROFILES[qwen27_model]="Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled.i1-Q4_K_M.gguf"
 PROFILES[qwen27_name]="Qwen3.5 27B Opus"
+PROFILES[qwen36_provider]="llama-cpp-qwen36"
+PROFILES[qwen36_model]="Qwen3.6-35B-A3B-UD-Q4_K_S.gguf"
+PROFILES[qwen36_name]="Qwen3.6 35B A3B"
 
 # Colors
 RED='\033[0;31m'
@@ -55,22 +55,22 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo ""
     echo "For room-level model switching, use Matrix commands:"
     echo "  !model          - Show current model status"
-    echo "  !model gemma4   - Switch to Gemma4"
     echo "  !model qwen27   - Switch to Qwen27"
-    echo "  !m g4           - Switch to Gemma4 (alias)"
+    echo "  !model qwen36   - Switch to Qwen36 (primary)"
     echo "  !m q27          - Switch to Qwen27 (alias)"
+    echo "  !m q36          - Switch to Qwen36 (alias)"
     echo ""
     echo "Profiles:"
-    echo "  gemma4  - Gemma4 26B A4B (on port 8081)"
     echo "  qwen27  - Qwen3.5 27B Opus (on port 8080)"
+    echo "  qwen36  - Qwen3.6 35B A3B (on port 8081) [primary]"
     echo ""
     echo "Options:"
     echo "  --status  Show current model configuration (alias for model-status.sh)"
     echo "  --dry-run Show what would change without applying"
     echo ""
     echo "Example:"
-    echo "  $0 gemma4     # Set global default to Gemma4 and restart service"
     echo "  $0 qwen27     # Set global default to Qwen27 and restart service"
+    echo "  $0 qwen36     # Set global default to Qwen36 and restart service"
     echo ""
     echo "NOTE: Use !model in Matrix for per-room switching without restart."
     exit 0
@@ -95,7 +95,7 @@ fi
 if [[ -z "$PROFILE" ]]; then
     echo -e "${RED}ERROR: No profile specified${NC}"
     echo ""
-    echo "Usage: $0 <gemma4|qwen27>"
+    echo "Usage: $0 <qwen27|qwen36>"
     echo "       $0 --status"
     exit 1
 fi
@@ -108,14 +108,14 @@ if [[ "$DRY_RUN" == true ]]; then
     fi
 else
     case "$PROFILE" in
-        gemma4|qwen27)
+        qwen27|qwen36)
             ;;
         *)
             echo -e "${RED}ERROR: Unknown profile '$PROFILE'${NC}"
             echo ""
             echo "Available profiles:"
-            echo "  gemma4  - Gemma4 26B A4B"
             echo "  qwen27  - Qwen3.5 27B Opus"
+            echo "  qwen36  - Qwen3.6 35B A3B [primary]"
             exit 1
             ;;
     esac

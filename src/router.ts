@@ -65,13 +65,13 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           "  !model        - Show current model status\n" +
           "  !model --status - Show current model status\n" +
           "  !model --clear  - Clear room override (fall back to global)\n" +
-          "  !model gemma4 - Switch to Gemma4 model\n" +
           "  !model qwen27 - Switch to Qwen27 model\n" +
+          "  !model qwen36 - Switch to Qwen36 model (primary)\n" +
           "\nShort aliases:\n" +
           "  !m -s         - Show status (alias for !model --status)\n" +
           "  !m -c         - Clear room override (alias for !model --clear)\n" +
-          "  !m g4         - Switch to Gemma4 (alias)\n" +
           "  !m q27        - Switch to Qwen27 (alias)\n" +
+          "  !m q36        - Switch to Qwen36 (alias)\n" +
           "\nPhase 2 features:\n" +
           "  - Model switch is room-persistent (survives restart and !reset)\n" +
           "  - Does not contaminate global default for other rooms\n" +

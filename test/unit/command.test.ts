@@ -60,10 +60,10 @@ describe("parseCommand", () => {
     expect(parseCommand("!model --status")).toEqual({ kind: "command_model_status" });
   });
 
-  it("parses !model gemma4 as command_model_switch", () => {
-    expect(parseCommand("!model gemma4")).toEqual({
+  it("parses !model qwen36 as command_model_switch", () => {
+    expect(parseCommand("!model qwen36")).toEqual({
       kind: "command_model_switch",
-      profile: "gemma4",
+      profile: "qwen36",
     });
   });
 
@@ -74,10 +74,10 @@ describe("parseCommand", () => {
     });
   });
 
-  it("parses !m g4 as command_model_switch with canonicalized profile", () => {
-    expect(parseCommand("!m g4")).toEqual({
+  it("parses !m q36 as command_model_switch with canonicalized profile", () => {
+    expect(parseCommand("!m q36")).toEqual({
       kind: "command_model_switch",
-      profile: "gemma4", // g4 is canonicalized to gemma4
+      profile: "qwen36", // q36 is canonicalized to qwen36
     });
   });
 
@@ -89,9 +89,9 @@ describe("parseCommand", () => {
   });
 
   it("parses !model with uppercase as command_model_switch (normalized)", () => {
-    expect(parseCommand("!model GEMMA4")).toEqual({
+    expect(parseCommand("!model QWEN36")).toEqual({
       kind: "command_model_switch",
-      profile: "gemma4", // GEMMA4 is normalized to lowercase
+      profile: "qwen36", // QWEN36 is normalized to lowercase
     });
   });
 
@@ -110,8 +110,8 @@ describe("parseCommand", () => {
   });
 
   it("treats !model with extra args as chat_prompt (malformed)", () => {
-    // "!model gemma4 qwen27" is malformed - should not silently parse
-    expect(parseCommand("!model gemma4 qwen27")).toEqual({ kind: "command_help" });
+    // "!model qwen36 qwen27" is malformed - should not silently parse
+    expect(parseCommand("!model qwen36 qwen27")).toEqual({ kind: "command_help" });
   });
 
   it("treats !m --status as command_model_status", () => {

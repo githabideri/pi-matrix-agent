@@ -229,13 +229,13 @@ describe("RoomModelManager - Source of Truth for Rehydration", () => {
 
     // Set desired model for a room (using roomId as key)
     const roomId = "!room1:example.com";
-    manager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    manager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     // Verify it's stored
     const desiredModel = manager.getDesiredModel(roomId);
     expect(desiredModel).toBeDefined();
-    expect(desiredModel!.desiredModel).toBe("gemma4");
-    expect(desiredModel!.resolvedModelId).toBe("test-model-gemma");
+    expect(desiredModel!.desiredModel).toBe("qwen36");
+    expect(desiredModel!.resolvedModelId).toBe("test-model-qwen36");
   });
 
   it("persisted room-models.json contains all rooms with desired model overrides", async () => {
@@ -243,7 +243,7 @@ describe("RoomModelManager - Source of Truth for Rehydration", () => {
     const manager = new RoomModelManager(agentTestDir);
 
     // Set desired models for multiple rooms
-    manager.setDesiredModel("!room1:example.com", "gemma4", "test-model-gemma");
+    manager.setDesiredModel("!room1:example.com", "qwen36", "test-model-qwen36");
     manager.setDesiredModel("!room2:example.com", "qwen27", "test-model-qwen");
 
     // Read the persisted file directly
@@ -260,9 +260,9 @@ describe("RoomModelManager - Source of Truth for Rehydration", () => {
     const manager = new RoomModelManager(agentTestDir);
 
     // Set desired models for multiple rooms
-    manager.setDesiredModel("!room1:example.com", "gemma4", "test-model-gemma");
+    manager.setDesiredModel("!room1:example.com", "qwen36", "test-model-qwen36");
     manager.setDesiredModel("!room2:example.com", "qwen27", "test-model-qwen");
-    manager.setDesiredModel("!room3:example.com", "gemma4", "test-model-gemma");
+    manager.setDesiredModel("!room3:example.com", "qwen36", "test-model-qwen36");
 
     // Access internal store for testing
     const store = (manager as any).store;
@@ -354,7 +354,7 @@ describe("Rehydration - Control Plane Discovery", () => {
     await backend1.getOrCreateSession(roomId);
 
     // Set desired model
-    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     await backend1.dispose();
 
@@ -375,7 +375,7 @@ describe("Rehydration - Control Plane Discovery", () => {
     // Also verify that the desired model is accessible
     const desiredModel = backend2.getDesiredModelForRoom(roomId);
     expect(desiredModel).toBeDefined();
-    expect(desiredModel!.desiredModel).toBe("gemma4");
+    expect(desiredModel!.desiredModel).toBe("qwen36");
 
     await backend2.dispose();
   });
@@ -393,7 +393,7 @@ describe("Rehydration - Control Plane Discovery", () => {
     await backend1.getOrCreateSession(roomId);
 
     // Set desired model
-    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     await backend1.dispose();
 
@@ -409,8 +409,8 @@ describe("Rehydration - Control Plane Discovery", () => {
 
     // Status should be available even though room is not live
     expect(status).not.toBeNull();
-    expect(status!.desiredModel).toBe("gemma4");
-    expect(status!.desiredResolvedModelId).toBe("test-model-gemma");
+    expect(status!.desiredModel).toBe("qwen36");
+    expect(status!.desiredResolvedModelId).toBe("test-model-qwen36");
 
     await backend2.dispose();
   });
@@ -428,7 +428,7 @@ describe("Rehydration - Control Plane Discovery", () => {
     await backend1.getOrCreateSession(roomId);
 
     // Set desired model
-    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     await backend1.dispose();
 
@@ -447,7 +447,7 @@ describe("Rehydration - Control Plane Discovery", () => {
 
     // Status should be available
     expect(status).not.toBeNull();
-    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.desiredModel).toBe("qwen36");
 
     // Room should now be live (rehydrated)
     expect(backend2.getSessionByKey(RoomStateManager.hashRoomId(roomId))).toBeDefined();
@@ -486,7 +486,7 @@ describe("Rehydration - Control Plane Discovery", () => {
     await backend1.getOrCreateSession(roomId);
 
     // Set desired model
-    (backend1 as any).roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    (backend1 as any).roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     await backend1.dispose();
 
@@ -503,7 +503,7 @@ describe("Rehydration - Control Plane Discovery", () => {
 
     // Should return status, not null
     expect(status).not.toBeNull();
-    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.desiredModel).toBe("qwen36");
 
     // Room should now be live after rehydration
     const roomState = backend2.getSessionByKey(RoomStateManager.hashRoomId(roomId));

@@ -27,13 +27,13 @@ async function createTestAgentDir(withModels: boolean = false): Promise<string> 
   const modelsContent = withModels
     ? {
         providers: {
-          "llama-cpp-gemma4": {
+          "llama-cpp-qwen36": {
             baseUrl: "http://test-gemma:8081/v1",
             api: "openai-completions",
             apiKey: "test-key",
             models: [
               {
-                id: "test-model-gemma",
+                id: "test-model-qwen36",
                 name: "Test Gemma4 Model",
                 reasoning: true,
                 input: ["text"],
@@ -265,7 +265,7 @@ describe("PiSessionBackend model switching", () => {
   });
 
   it("switchModel() rejects with error for non-existent room", async () => {
-    await expect(backend.switchModel("!nonexistent:example.com", "gemma4")).rejects.toThrow();
+    await expect(backend.switchModel("!nonexistent:example.com", "qwen36")).rejects.toThrow();
   });
 
   it("switchModel() rejects while room is processing", async () => {
@@ -276,7 +276,7 @@ describe("PiSessionBackend model switching", () => {
     backend.setProcessing(roomId, true);
 
     // Switch should be rejected
-    await expect(backend.switchModel(roomId, "gemma4")).rejects.toThrow(/processing|busy|in progress/i);
+    await expect(backend.switchModel(roomId, "qwen36")).rejects.toThrow(/processing|busy|in progress/i);
   });
 
   it("switchModel() updates snapshot model after switch", async () => {
@@ -389,11 +389,11 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Access private method via any cast for testing
     const backendAny = backend as any;
-    const model = backendAny.findModelByProfile("gemma4");
+    const model = backendAny.findModelByProfile("qwen36");
 
     expect(model).not.toBeNull();
-    expect(model!.provider).toBe("llama-cpp-gemma4");
-    expect(model!.id).toBe("test-model-gemma");
+    expect(model!.provider).toBe("llama-cpp-qwen36");
+    expect(model!.id).toBe("test-model-qwen36");
   });
 
   it("finds qwen27 model by profile", async () => {
@@ -426,7 +426,7 @@ describe("PiSessionBackend model switching with models", () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("Unknown profile");
-    expect(result.message).toContain("gemma4");
+    expect(result.message).toContain("qwen36");
     expect(result.message).toContain("qwen27");
   });
 
@@ -439,14 +439,14 @@ describe("PiSessionBackend model switching with models", () => {
     expect(initialStatus).not.toBeNull();
 
     // Switch to gemma4
-    const switchResult = await backend.switchModel(roomId, "gemma4");
+    const switchResult = await backend.switchModel(roomId, "qwen36");
 
     expect(switchResult.success).toBe(true);
-    expect(switchResult.activeModel).toBe("test-model-gemma");
+    expect(switchResult.activeModel).toBe("test-model-qwen36");
 
     // Verify status reflects the switch
     const newStatus = await backend.getModelStatus(roomId);
-    expect(newStatus!.model).toBe("test-model-gemma");
+    expect(newStatus!.model).toBe("test-model-qwen36");
   });
 
   it("switchModel() can switch back and forth", async () => {
@@ -454,9 +454,9 @@ describe("PiSessionBackend model switching with models", () => {
     await backend.getOrCreateSession(roomId);
 
     // Switch to gemma4
-    let result = await backend.switchModel(roomId, "gemma4");
+    let result = await backend.switchModel(roomId, "qwen36");
     expect(result.success).toBe(true);
-    expect(result.activeModel).toBe("test-model-gemma");
+    expect(result.activeModel).toBe("test-model-qwen36");
 
     // Switch to qwen27
     result = await backend.switchModel(roomId, "qwen27");
@@ -464,9 +464,9 @@ describe("PiSessionBackend model switching with models", () => {
     expect(result.activeModel).toBe("test-model-qwen");
 
     // Switch back to gemma4
-    result = await backend.switchModel(roomId, "gemma4");
+    result = await backend.switchModel(roomId, "qwen36");
     expect(result.success).toBe(true);
-    expect(result.activeModel).toBe("test-model-gemma");
+    expect(result.activeModel).toBe("test-model-qwen36");
   });
 
   it("switchModel() with alias resolves to correct model", async () => {
@@ -475,10 +475,10 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Note: Aliases are resolved in the parser, not in switchModel
     // switchModel receives the canonicalized profile name
-    const result = await backend.switchModel(roomId, "gemma4");
+    const result = await backend.switchModel(roomId, "qwen36");
 
     expect(result.success).toBe(true);
-    expect(result.activeModel).toBe("test-model-gemma");
+    expect(result.activeModel).toBe("test-model-qwen36");
   });
 
   it("getModelStatus() reports runtime model, not settings default", async () => {
@@ -487,12 +487,12 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Settings default is qwen27, but after switching to gemma4,
     // status should report the active runtime model
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     const status = await backend.getModelStatus(roomId);
 
     // Status should report the switched model, not the settings default
-    expect(status!.model).toBe("test-model-gemma");
+    expect(status!.model).toBe("test-model-qwen36");
   });
 
   it("switchModel() in room A does not change room B's active model", async () => {
@@ -504,17 +504,17 @@ describe("PiSessionBackend model switching with models", () => {
     await backend.getOrCreateSession(roomB);
 
     // Switch room A to gemma4
-    const resultA = await backend.switchModel(roomA, "gemma4");
+    const resultA = await backend.switchModel(roomA, "qwen36");
     expect(resultA.success).toBe(true);
 
     // Verify room A's model changed
     const statusA = await backend.getModelStatus(roomA);
-    expect(statusA!.model).toBe("test-model-gemma");
+    expect(statusA!.model).toBe("test-model-qwen36");
 
     // Room B should be unaffected (still has no active model or default)
     const statusB = await backend.getModelStatus(roomB);
     // Room B's model should not be gemma4
-    expect(statusB!.model).not.toBe("test-model-gemma");
+    expect(statusB!.model).not.toBe("test-model-qwen36");
   });
 
   it("switchModel() persists desired model per room", async () => {
@@ -522,13 +522,13 @@ describe("PiSessionBackend model switching with models", () => {
     await backend.getOrCreateSession(roomId);
 
     // Switch to gemma4
-    const result = await backend.switchModel(roomId, "gemma4");
+    const result = await backend.switchModel(roomId, "qwen36");
     expect(result.success).toBe(true);
 
     // Verify status includes desired model info
     const status = await backend.getModelStatus(roomId);
-    expect(status!.desiredModel).toBe("gemma4");
-    expect(status!.desiredResolvedModelId).toBe("test-model-gemma");
+    expect(status!.desiredModel).toBe("qwen36");
+    expect(status!.desiredResolvedModelId).toBe("test-model-qwen36");
   });
 
   it("getModelStatus() reports global default", async () => {
@@ -545,11 +545,11 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Set desired model to gemma4
     const backendAny = backend as any;
-    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    backendAny.roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     // Get status - should show mismatch since active is qwen27 but desired is gemma4
     const status = await backend.getModelStatus(roomId);
-    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.desiredModel).toBe("qwen36");
     expect(status!.modelMismatch).toBe(true);
   });
 
@@ -559,12 +559,12 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Set desired model
     const backendAny = backend as any;
-    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    backendAny.roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     // Clear desired model
     const result = await backend.clearDesiredModel(roomId);
     expect(result.success).toBe(true);
-    expect(result.previousDesiredModel).toBe("gemma4");
+    expect(result.previousDesiredModel).toBe("qwen36");
 
     // Verify room override was removed
     const status = await backend.getModelStatus(roomId);
@@ -598,7 +598,7 @@ describe("PiSessionBackend model switching with models", () => {
     expect(originalSettings.defaultModel).toBe("test-model-qwen");
 
     // Switch room A to gemma4
-    const resultA = await backend.switchModel(roomA, "gemma4");
+    const resultA = await backend.switchModel(roomA, "qwen36");
     expect(resultA.success).toBe(true);
 
     // Immediately switch room B to qwen27 (explicitly, even though it's the default)
@@ -607,8 +607,8 @@ describe("PiSessionBackend model switching with models", () => {
 
     // Verify room A has gemma4
     const statusA = await backend.getModelStatus(roomA);
-    expect(statusA!.model).toBe("test-model-gemma");
-    expect(statusA!.desiredModel).toBe("gemma4");
+    expect(statusA!.model).toBe("test-model-qwen36");
+    expect(statusA!.desiredModel).toBe("qwen36");
 
     // Verify room B has qwen27
     const statusB = await backend.getModelStatus(roomB);
@@ -656,7 +656,7 @@ describe("PiSessionBackend model switch global side effects", () => {
     const _sessionA = await backend.getOrCreateSession(roomA);
 
     // Switch room A to gemma4
-    const switchResult = await backend.switchModel(roomA, "gemma4");
+    const switchResult = await backend.switchModel(roomA, "qwen36");
     expect(switchResult.success).toBe(true);
 
     // Create a fresh room B
@@ -681,7 +681,7 @@ describe("PiSessionBackend model switch global side effects", () => {
     await backend.getOrCreateSession(roomA);
 
     // Switch to gemma4
-    await backend.switchModel(roomA, "gemma4");
+    await backend.switchModel(roomA, "qwen36");
 
     // Do !reset
     await backend.reset(roomA);
@@ -692,7 +692,7 @@ describe("PiSessionBackend model switch global side effects", () => {
 
     // The new session after reset should get the last switched model
     // because setModel() updated the global default
-    expect(statusAfterReset!.model).toBe("test-model-gemma");
+    expect(statusAfterReset!.model).toBe("test-model-qwen36");
   });
 });
 
@@ -726,11 +726,11 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Phase 1: Set desired model in first backend
     await backend.getOrCreateSession(roomId);
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     // Verify desired model was set
     const status1 = await backend.getModelStatus(roomId);
-    expect(status1!.desiredModel).toBe("gemma4");
+    expect(status1!.desiredModel).toBe("qwen36");
 
     // Dispose first backend (simulates restart)
     await backend.dispose();
@@ -747,7 +747,7 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Verify desired model persisted
     const status2 = await backend2.getModelStatus(roomId);
-    expect(status2!.desiredModel).toBe("gemma4");
+    expect(status2!.desiredModel).toBe("qwen36");
 
     await backend2.dispose();
   });
@@ -757,11 +757,11 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Set desired model to gemma4
     await backend.getOrCreateSession(roomId);
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     // Verify desired model was set
     const beforeReset = await backend.getModelStatus(roomId);
-    expect(beforeReset!.desiredModel).toBe("gemma4");
+    expect(beforeReset!.desiredModel).toBe("qwen36");
 
     // Do !reset
     await backend.reset(roomId);
@@ -771,8 +771,8 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Verify desired model was reapplied (active model should be gemma4)
     const afterReset = await backend.getModelStatus(roomId);
-    expect(afterReset!.desiredModel).toBe("gemma4");
-    expect(afterReset!.model).toBe("test-model-gemma");
+    expect(afterReset!.desiredModel).toBe("qwen36");
+    expect(afterReset!.model).toBe("test-model-qwen36");
   });
 
   it("desired model is reapplied on same-room resume", async () => {
@@ -781,11 +781,11 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Set desired model to gemma4 without actually switching (to simulate drift)
     await backend.getOrCreateSession(roomId);
-    backendAny.roomModelManager.setDesiredModel(roomId, "gemma4", "test-model-gemma");
+    backendAny.roomModelManager.setDesiredModel(roomId, "qwen36", "test-model-qwen36");
 
     // Verify desired model was set but active is still qwen27 (drift)
     const beforeResume = await backend.getModelStatus(roomId);
-    expect(beforeResume!.desiredModel).toBe("gemma4");
+    expect(beforeResume!.desiredModel).toBe("qwen36");
     expect(beforeResume!.modelMismatch).toBe(true);
 
     // Remove session from cache to simulate disconnect
@@ -796,7 +796,7 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Verify desired model was reapplied
     const afterResume = await backend.getModelStatus(roomId);
-    expect(afterResume!.model).toBe("test-model-gemma");
+    expect(afterResume!.model).toBe("test-model-qwen36");
     expect(afterResume!.modelMismatch).toBe(false);
   });
 
@@ -806,7 +806,7 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Switch room A to gemma4
     await backend.getOrCreateSession(roomA);
-    await backend.switchModel(roomA, "gemma4");
+    await backend.switchModel(roomA, "qwen36");
 
     // Create fresh room B
     await backend.getOrCreateSession(roomB);
@@ -818,7 +818,7 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Room A should still have gemma4 as desired
     const statusA = await backend.getModelStatus(roomA);
-    expect(statusA!.desiredModel).toBe("gemma4");
+    expect(statusA!.desiredModel).toBe("qwen36");
   });
 
   it("clear desired model falls back to global default", async () => {
@@ -826,7 +826,7 @@ describe("PiSessionBackend Phase 2: Per-room desired model persistence", () => {
 
     // Set desired model to gemma4
     await backend.getOrCreateSession(roomId);
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     // Clear desired model
     await backend.clearDesiredModel(roomId);
@@ -873,12 +873,12 @@ describe("PiSessionBackend model persistence across resume", () => {
     console.log(`[TEST] Session file before switch: ${sessionFile}`);
 
     // Switch to gemma4
-    const switchResult = await backend1.switchModel(roomId, "gemma4");
+    const switchResult = await backend1.switchModel(roomId, "qwen36");
     expect(switchResult.success).toBe(true);
 
     // Verify switch worked
     const statusAfterSwitch = await backend1.getModelStatus(roomId);
-    expect(statusAfterSwitch!.model).toBe("test-model-gemma");
+    expect(statusAfterSwitch!.model).toBe("test-model-qwen36");
 
     console.log(`[TEST] Model after switch: ${statusAfterSwitch!.model}`);
 
@@ -910,7 +910,7 @@ describe("PiSessionBackend model persistence across resume", () => {
     // Both mechanisms contribute to persistence.
     // In practice, the global default mechanism is what makes this work,
     // because setModel() updates the global default.
-    expect(statusAfterResume!.model).toBe("test-model-gemma");
+    expect(statusAfterResume!.model).toBe("test-model-qwen36");
 
     await backend2.dispose();
   });
@@ -936,7 +936,7 @@ describe("PiSessionBackend model persistence across resume", () => {
     console.log(`[TEST] Original settings:`, originalSettings);
 
     // Switch to gemma4
-    await backend1.switchModel(roomId, "gemma4");
+    await backend1.switchModel(roomId, "qwen36");
 
     // Read settings.json after switch
     const settingsAfterSwitch = JSON.parse(await fs.readFile(settingsPath, "utf-8"));
@@ -949,8 +949,8 @@ describe("PiSessionBackend model persistence across resume", () => {
 
     // But the room's active model should be gemma4
     const roomStatus = await backend1.getModelStatus(roomId);
-    expect(roomStatus!.model).toBe("test-model-gemma");
-    expect(roomStatus!.desiredModel).toBe("gemma4");
+    expect(roomStatus!.model).toBe("test-model-qwen36");
+    expect(roomStatus!.desiredModel).toBe("qwen36");
 
     await backend1.dispose();
 
@@ -1012,13 +1012,13 @@ describe("PiSessionBackend model persistence across resume", () => {
     expect(status!.model).toBe("test-model-qwen"); // Default from global settings
 
     // Phase 2: Switch room A to gemma4 (sets desired model to gemma4)
-    const switchResult = await backend1.switchModel(roomId, "gemma4");
+    const switchResult = await backend1.switchModel(roomId, "qwen36");
     expect(switchResult.success).toBe(true);
 
     status = await backend1.getModelStatus(roomId);
     console.log(`[TEST] Room A after switch: ${status!.model}, desired: ${status!.desiredModel}`);
-    expect(status!.model).toBe("test-model-gemma");
-    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.model).toBe("test-model-qwen36");
+    expect(status!.desiredModel).toBe("qwen36");
 
     // Phase 3: Manually reset global default to qwen27
     console.log(`[TEST] Manually resetting global default to qwen27...`);
@@ -1054,8 +1054,8 @@ describe("PiSessionBackend model persistence across resume", () => {
     // PHASE 2 RESULT: The resumed model is gemma4 (desired), NOT qwen27 (global default).
     // This proves that same-room resume now re-applies desired model from room-models.json,
     // independent of global default contamination.
-    expect(status!.model).toBe("test-model-gemma"); // gemma4, because desired model was reapplied
-    expect(status!.desiredModel).toBe("gemma4");
+    expect(status!.model).toBe("test-model-qwen36"); // gemma4, because desired model was reapplied
+    expect(status!.desiredModel).toBe("qwen36");
 
     await backend2.dispose();
   });
@@ -1074,7 +1074,7 @@ describe("PiSessionBackend model persistence across resume", () => {
     const sessionFile = statusBefore!.sessionFile!;
 
     // Switch model
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     // Force session to persist by accessing its properties
     // The SDK may buffer writes
@@ -1104,8 +1104,8 @@ describe("PiSessionBackend model persistence across resume", () => {
       }
 
       expect(lastModelChange).not.toBeNull();
-      expect(lastModelChange!.provider).toBe("llama-cpp-gemma4");
-      expect(lastModelChange!.modelId).toBe("test-model-gemma");
+      expect(lastModelChange!.provider).toBe("llama-cpp-qwen36");
+      expect(lastModelChange!.modelId).toBe("test-model-qwen36");
     }
 
     await backend.dispose();

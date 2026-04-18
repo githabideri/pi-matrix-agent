@@ -747,8 +747,8 @@ export class PiSessionBackend {
 
     // Profile name to provider prefix mapping
     const profileToProviderPrefix: Record<string, string> = {
-      gemma4: "llama-cpp-gemma4",
       qwen27: "llama-cpp-qwen27",
+      qwen36: "llama-cpp-qwen36",
     };
 
     const providerPrefix = profileToProviderPrefix[profile];
@@ -912,7 +912,7 @@ export class PiSessionBackend {
     if (!targetModel) {
       return {
         success: false,
-        message: `Unknown profile "${requestedProfile}". Available profiles: gemma4, qwen27 (aliases: g4, q27)`,
+        message: `Unknown profile "${requestedProfile}". Available profiles: qwen27, qwen36 (aliases: q27, q36)`,
         requestedProfile,
       };
     }

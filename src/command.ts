@@ -2,12 +2,12 @@ import type { ParsedCommand } from "./types.js";
 
 // Model profile registry - maps aliases to canonical profile names
 const MODEL_ALIASES: Record<string, string> = {
-  g4: "gemma4",
   q27: "qwen27",
+  q36: "qwen36",
 };
 
 // Canonical profile names (lowercase)
-const CANONICAL_PROFILES = new Set(["gemma4", "qwen27"]);
+const CANONICAL_PROFILES = new Set(["qwen27", "qwen36"]);
 
 /**
  * Resolve a model profile name or alias to canonical form.

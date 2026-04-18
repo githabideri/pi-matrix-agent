@@ -28,7 +28,7 @@ async function createTestAgentDir(withModels: boolean = false): Promise<string> 
   const modelsContent = withModels
     ? {
         providers: {
-          "llama-cpp-gemma4": {
+          "llama-cpp-qwen36": {
             baseUrl: "http://test-gemma:8081/v1",
             api: "openai-completions",
             apiKey: "test-key",
@@ -249,11 +249,11 @@ describe("Bugfix 3: !model --clear switches live session to global default", () 
 
     // Create session and switch to gemma4
     await backend.getOrCreateSession(roomId);
-    await backend.switchModel(roomId, "gemma4");
+    await backend.switchModel(roomId, "qwen36");
 
     // Verify desired model is set
     const statusBefore = await backend.getModelStatus(roomId);
-    expect(statusBefore!.desiredModel).toBe("gemma4");
+    expect(statusBefore!.desiredModel).toBe("qwen36");
 
     // Clear desired model (room is idle)
     const result = await backend.clearDesiredModel(roomId);
@@ -261,7 +261,7 @@ describe("Bugfix 3: !model --clear switches live session to global default", () 
     expect(result.success).toBe(true);
     // Message should indicate immediate switch since room is idle
     expect(result.message).toContain("Switched back to global default");
-    expect(result.previousDesiredModel).toBe("gemma4");
+    expect(result.previousDesiredModel).toBe("qwen36");
 
     // Verify desired model was cleared
     const statusAfter = await backend.getModelStatus(roomId);

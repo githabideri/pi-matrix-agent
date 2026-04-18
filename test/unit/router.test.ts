@@ -378,7 +378,7 @@ describe("routeMessage model commands", () => {
     expect(replies[0].toLowerCase()).toContain("switch");
   });
 
-  it("switches model for !m g4 command (alias)", async () => {
+  it("switches model for !m q36 command (alias)", async () => {
     const replies: string[] = [];
     const sink: ReplySink = {
       async reply(_roomId, _eventId, text) {
@@ -391,12 +391,12 @@ describe("routeMessage model commands", () => {
         throw new Error("SHOULD NOT BE CALLED");
       },
       async switchModel(_roomId, profile) {
-        // profile should be canonicalized to "gemma4"
+        // profile should be canonicalized to "qwen36"
         return {
           success: true,
           message: `Switched to ${profile}`,
           requestedProfile: profile,
-          activeModel: "gemma-model-id",
+          activeModel: "qwen36-model-id",
         };
       },
     };
@@ -405,7 +405,7 @@ describe("routeMessage model commands", () => {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!m g4",
+      body: "!m q36",
     };
 
     await routeMessage(msg, {
@@ -419,8 +419,8 @@ describe("routeMessage model commands", () => {
     });
 
     expect(replies.length).toBe(1);
-    // Should mention gemma4 (canonicalized from g4)
-    expect(replies[0]).toContain("gemma4");
+    // Should mention qwen36 (canonicalized from q36)
+    expect(replies[0]).toContain("qwen36");
   });
 
   it("rejects model switch while room is processing", async () => {
@@ -445,7 +445,7 @@ describe("routeMessage model commands", () => {
       roomId: "!room:example.org",
       eventId: "$event",
       sender: "@user:example.org",
-      body: "!model gemma4",
+      body: "!model qwen36",
     };
 
     await routeMessage(msg, {
@@ -495,7 +495,7 @@ describe("routeMessage model commands", () => {
 
     expect(replies.length).toBe(1);
     expect(replies[0]).toContain("!model");
-    expect(replies[0]).toContain("gemma4");
+    expect(replies[0]).toContain("qwen36");
     expect(replies[0]).toContain("qwen27");
   });
 });
@@ -568,7 +568,7 @@ describe("routeMessage model clear command", () => {
           success: true,
           message:
             "Desired model cleared for this room. The global default will apply on next rehydrate/reset/new session.",
-          previousDesiredModel: "gemma4",
+          previousDesiredModel: "qwen36",
         };
       },
     };
@@ -594,7 +594,7 @@ describe("routeMessage model clear command", () => {
     expect(replies[0]).toContain("✓");
     expect(replies[0]).toContain("Desired model cleared for this room");
     expect(replies[0]).toContain("The global default will apply on next rehydrate/reset/new session");
-    expect(replies[0]).toContain("gemma4");
+    expect(replies[0]).toContain("qwen36");
     // Verify router does NOT add misleading unconditional "will now use" line
     expect(replies[0]).not.toContain("This room will now use the global default model");
   });
@@ -665,7 +665,7 @@ describe("routeMessage model clear command", () => {
         return {
           success: true,
           message: "Desired model cleared for this room. Switched back to global default model.",
-          previousDesiredModel: "gemma4",
+          previousDesiredModel: "qwen36",
         };
       },
     };
@@ -690,7 +690,7 @@ describe("routeMessage model clear command", () => {
     expect(replies.length).toBe(1);
     expect(replies[0]).toContain("✓");
     expect(replies[0]).toContain("Desired model cleared for this room");
-    expect(replies[0]).toContain("gemma4");
+    expect(replies[0]).toContain("qwen36");
   });
 
   it("help text includes --clear command", async () => {
@@ -746,12 +746,12 @@ describe("routeMessage model status with Phase 2 info", () => {
       async getModelStatus(_roomId) {
         return {
           active: true,
-          model: "test-model-gemma",
+          model: "test-model-qwen36",
           thinkingLevel: "high",
           sessionId: "test-session-id",
           sessionFile: "/path/to/session.jsonl",
-          desiredModel: "gemma4",
-          desiredResolvedModelId: "test-model-gemma",
+          desiredModel: "qwen36",
+          desiredResolvedModelId: "test-model-qwen36",
           globalDefault: "qwen27",
           modelMismatch: false,
         };
@@ -776,8 +776,8 @@ describe("routeMessage model status with Phase 2 info", () => {
     });
 
     expect(replies.length).toBe(1);
-    expect(replies[0]).toContain("test-model-gemma");
-    expect(replies[0]).toContain("gemma4");
+    expect(replies[0]).toContain("test-model-qwen36");
+    expect(replies[0]).toContain("qwen36");
     expect(replies[0]).toContain("qwen27");
   });
 
@@ -796,12 +796,12 @@ describe("routeMessage model status with Phase 2 info", () => {
       async getModelStatus(_roomId) {
         return {
           active: true,
-          model: "test-model-qwen", // Active is qwen
+          model: "test-model-qwen27", // Active is qwen27
           thinkingLevel: "high",
           sessionId: "test-session-id",
           sessionFile: "/path/to/session.jsonl",
-          desiredModel: "gemma4", // Desired is gemma
-          desiredResolvedModelId: "test-model-gemma",
+          desiredModel: "qwen36", // Desired is qwen36
+          desiredResolvedModelId: "test-model-qwen36",
           globalDefault: "qwen27",
           modelMismatch: true, // Mismatch detected
         };

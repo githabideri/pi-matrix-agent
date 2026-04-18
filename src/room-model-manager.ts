@@ -95,12 +95,12 @@ export class RoomModelManager {
       const settings = JSON.parse(settingsContent);
 
       if (settings.defaultProvider && settings.defaultModel) {
-        // Extract profile from provider name (e.g., "llama-cpp-qwen27" -> "qwen27")
+        // Extract profile from provider name (e.g., "llama-cpp-qwen36" -> "qwen36")
         const provider = settings.defaultProvider;
-        if (provider.includes("gemma4")) {
-          this.globalDefault = "gemma4";
-        } else if (provider.includes("qwen27")) {
+        if (provider.includes("qwen27")) {
           this.globalDefault = "qwen27";
+        } else if (provider.includes("qwen36")) {
+          this.globalDefault = "qwen36";
         }
       }
 

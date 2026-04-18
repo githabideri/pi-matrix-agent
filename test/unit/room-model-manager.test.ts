@@ -60,7 +60,7 @@ describe("RoomModelManager", () => {
         JSON.stringify({
           rooms: {
             "!room1:example.com": {
-              desiredModel: "gemma4",
+              desiredModel: "qwen36",
               resolvedModelId: "test-gemma-model-id",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
@@ -72,7 +72,7 @@ describe("RoomModelManager", () => {
 
       const desired = manager.getDesiredModel("!room1:example.com");
       expect(desired).toBeDefined();
-      expect(desired!.desiredModel).toBe("gemma4");
+      expect(desired!.desiredModel).toBe("qwen36");
       expect(desired!.resolvedModelId).toBe("test-gemma-model-id");
     });
 
@@ -107,7 +107,7 @@ describe("RoomModelManager", () => {
         JSON.stringify({
           rooms: {
             "!room1:example.com": {
-              desiredModel: "gemma4",
+              desiredModel: "qwen36",
               resolvedModelId: "test-model",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
@@ -123,7 +123,7 @@ describe("RoomModelManager", () => {
 
       // Room 1 should be loaded
       const room1 = manager.getDesiredModel("!room1:example.com");
-      expect(room1?.desiredModel).toBe("gemma4");
+      expect(room1?.desiredModel).toBe("qwen36");
 
       // Room 2 should be filtered out
       const room2 = manager.getDesiredModel("!room2:example.com");
@@ -138,11 +138,11 @@ describe("RoomModelManager", () => {
     });
 
     it("returns desired model after setDesiredModel", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       const desired = manager.getDesiredModel("!room1:example.com");
       expect(desired).toBeDefined();
-      expect(desired!.desiredModel).toBe("gemma4");
+      expect(desired!.desiredModel).toBe("qwen36");
       expect(desired!.resolvedModelId).toBe("test-gemma-model-id");
       expect(desired!.updatedAt).toBeDefined();
     });
@@ -158,7 +158,7 @@ describe("RoomModelManager", () => {
     });
 
     it("persists desired model to file", async () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       // Read file directly to verify persistence
       const roomModelsPath = join(agentDir, "room-models.json");
@@ -166,11 +166,11 @@ describe("RoomModelManager", () => {
       const parsed = JSON.parse(content);
 
       expect(parsed.rooms["!room1:example.com"]).toBeDefined();
-      expect(parsed.rooms["!room1:example.com"].desiredModel).toBe("gemma4");
+      expect(parsed.rooms["!room1:example.com"].desiredModel).toBe("qwen36");
     });
 
     it("updates existing room entry", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-1");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-1");
       manager.setDesiredModel("!room1:example.com", "qwen27", "test-qwen-1");
 
       const desired = manager.getDesiredModel("!room1:example.com");
@@ -181,11 +181,11 @@ describe("RoomModelManager", () => {
 
   describe("clearDesiredModel", () => {
     it("removes desired model for a room", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       const cleared = manager.clearDesiredModel("!room1:example.com");
 
-      expect(cleared?.desiredModel).toBe("gemma4");
+      expect(cleared?.desiredModel).toBe("qwen36");
       expect(manager.getDesiredModel("!room1:example.com")).toBeUndefined();
     });
 
@@ -195,7 +195,7 @@ describe("RoomModelManager", () => {
     });
 
     it("persists clear to file", async () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
       manager.clearDesiredModel("!room1:example.com");
 
       const roomModelsPath = join(agentDir, "room-models.json");
@@ -208,10 +208,10 @@ describe("RoomModelManager", () => {
 
   describe("resolveDesiredModel", () => {
     it("returns room-specific desired model when set", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       const resolved = manager.resolveDesiredModel("!room1:example.com");
-      expect(resolved).toBe("gemma4");
+      expect(resolved).toBe("qwen36");
     });
 
     it("returns global default when no room-specific desired model", () => {
@@ -220,30 +220,30 @@ describe("RoomModelManager", () => {
     });
 
     it("room-specific desired model takes precedence over global default", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       const resolved = manager.resolveDesiredModel("!room1:example.com");
-      expect(resolved).toBe("gemma4"); // Not "qwen27"
+      expect(resolved).toBe("qwen36"); // Not "qwen27"
     });
   });
 
   describe("persistence across restart", () => {
     it("desired model persists when manager is recreated", () => {
       // Set desired model
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
 
       // Create new manager (simulates restart)
       const newManager = new RoomModelManager(agentDir);
 
       // Verify persistence
       const desired = newManager.getDesiredModel("!room1:example.com");
-      expect(desired?.desiredModel).toBe("gemma4");
+      expect(desired?.desiredModel).toBe("qwen36");
       expect(desired?.resolvedModelId).toBe("test-gemma-model-id");
     });
 
     it("cleared desired model persists when manager is recreated", () => {
       // Set then clear desired model
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
       manager.clearDesiredModel("!room1:example.com");
 
       // Create new manager (simulates restart)
@@ -257,18 +257,18 @@ describe("RoomModelManager", () => {
 
   describe("multiple rooms", () => {
     it("maintains separate desired models for different rooms", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
       manager.setDesiredModel("!room2:example.com", "qwen27", "test-qwen-model-id");
 
       const room1 = manager.getDesiredModel("!room1:example.com");
       const room2 = manager.getDesiredModel("!room2:example.com");
 
-      expect(room1?.desiredModel).toBe("gemma4");
+      expect(room1?.desiredModel).toBe("qwen36");
       expect(room2?.desiredModel).toBe("qwen27");
     });
 
     it("clearing one room does not affect another", () => {
-      manager.setDesiredModel("!room1:example.com", "gemma4", "test-gemma-model-id");
+      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
       manager.setDesiredModel("!room2:example.com", "qwen27", "test-qwen-model-id");
 
       manager.clearDesiredModel("!room1:example.com");
