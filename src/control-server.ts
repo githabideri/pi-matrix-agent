@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { Server } from "http";
+import type { Socket } from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import type { MatrixTransport } from "./matrix.js";
@@ -28,7 +29,7 @@ export class ControlServer {
   private host: string;
   private auth?: { username: string; password: string };
   private matrixTransport?: MatrixTransport;
-  private activeConnections: Set<any> = new Set(); // Track active HTTP connections for graceful shutdown
+  private activeConnections: Set<Socket> = new Set(); // Track active HTTP connections for graceful shutdown
 
   constructor(
     piBackend: PiSessionBackend,
@@ -53,10 +54,10 @@ export class ControlServer {
 
     // Track active connections for graceful shutdown
     this.app.use((req, _res, next) => {
-      const conn = (req as any).socket;
-      if (conn) {
-        this.activeConnections.add(conn);
-        conn.on("close", () => this.activeConnections.delete(conn));
+      const socket = req.socket;
+      if (socket) {
+        this.activeConnections.add(socket);
+        socket.on("close", () => this.activeConnections.delete(socket));
       }
       next();
     });
@@ -264,9 +265,9 @@ export class ControlServer {
       const connectionCount = this.activeConnections.size;
       if (connectionCount > 0) {
         console.log(`[ControlServer] Closing ${connectionCount} active connection(s)...`);
-        for (const conn of this.activeConnections) {
+        for (const socket of this.activeConnections) {
           try {
-            conn.destroy();
+            socket.destroy();
           } catch (err) {
             console.debug(`[ControlServer] Error destroying connection:`, err);
           }

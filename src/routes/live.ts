@@ -3,6 +3,7 @@ import type { MatrixTransport } from "../matrix.js";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildLiveTranscript } from "../transcript.js";
+import type { AcceptedPromptResponse, ContextResponse, LiveRoomDetail, LiveRoomListItem } from "../types.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
 
 export function routeLive(
@@ -13,9 +14,9 @@ export function routeLive(
   const router = Router();
 
   // GET /api/live/rooms - List all live rooms
-  router.get("/", (_req: Request, res: Response) => {
+  router.get("/", (_req: Request, res: Response): void => {
     const liveRooms = piBackend.listLiveRooms();
-    const result = liveRooms.map((room) => ({
+    const result: LiveRoomListItem[] = liveRooms.map((room) => ({
       roomId: room.roomId,
       roomKey: room.roomKey,
       sessionId: room.sessionId,
@@ -63,7 +64,7 @@ export function routeLive(
     try {
       console.log(`[LIVE] Building response object...`);
       // Build response directly from room state, no async calls
-      const response: any = {
+      const response: LiveRoomDetail = {
         roomId: roomState.roomId,
         roomKey: roomKey,
         sessionId: roomState.sessionId,
@@ -93,7 +94,7 @@ export function routeLive(
       console.log(`[LIVE] Response:`, JSON.stringify(response, null, 2));
       res.json(response);
       console.log(`[LIVE] res.json() called`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[LIVE] Error getting room details for ${roomKey}:`, error);
       res.status(500).json({ error: "Failed to get room details" });
     }
@@ -109,7 +110,7 @@ export function routeLive(
     }
 
     // Build response directly from snapshot (no async operations)
-    const response: any = {
+    const response: ContextResponse = {
       roomId: roomState.roomId,
       roomKey: roomState.roomKey,
       sessionId: roomState.sessionId,
@@ -244,13 +245,14 @@ export function routeLive(
       });
 
     // Return immediately with accepted metadata (no turnId - SSE provides authoritative turnId)
-    res.json({
+    const response: AcceptedPromptResponse = {
       accepted: true,
       roomKey,
       roomId,
       sessionId: roomState.sessionId,
       timestamp: new Date().toISOString(),
-    });
+    };
+    res.json(response);
   });
 
   // POST /api/live/rooms/:roomKey/reset - Reset live session

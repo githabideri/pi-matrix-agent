@@ -2,6 +2,7 @@ import { type Request, type Response, Router } from "express";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { extractSessionIdFromFilename, parseSessionMetadata, RoomStateManager } from "../room-state.js";
 import { parseSessionFile } from "../transcript.js";
+import type { ArchiveSessionListItem, ArchiveSessionMetadataResponse, InternalSessionInfo } from "../types.js";
 
 // Validation patterns
 const ROOM_KEY_PATTERN = /^[0-9a-f]+$/;
@@ -78,7 +79,7 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
     console.log(`[ARCHIVE] roomId from live rooms: ${roomId}`);
 
     try {
-      let archived: any[] = [];
+      let archived: InternalSessionInfo[] = [];
 
       if (roomId) {
         // Room is live, use existing method
@@ -92,14 +93,14 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
       console.log(`[ARCHIVE] Found ${archived.length} archived sessions`);
 
       // Format response
-      const result = archived.map((session) => ({
+      const result: ArchiveSessionListItem[] = archived.map((session) => ({
         sessionId: session.id,
         relativeSessionPath: getRelativePath(session.path, sessionBaseDir),
         firstMessage: session.firstMessage,
       }));
 
       res.json(result);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error listing archived sessions for ${roomKey}:`, error);
       res.status(500).json({ error: "Failed to list archived sessions" });
     }
@@ -131,13 +132,15 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
       const metadata = await parseSessionMetadata(sessionFile, sessionBaseDir);
       metadata.isLive = false;
 
-      res.json({
+      const response: ArchiveSessionMetadataResponse = {
         sessionId: metadata.sessionId,
         relativeSessionPath: metadata.relativePath,
-        firstMessage: metadata.firstMessage,
+        firstMessage: metadata.firstMessage || "",
         isLive: false,
-      });
-    } catch (error) {
+      };
+
+      res.json(response);
+    } catch (error: unknown) {
       console.error(`Error getting archived session metadata for ${roomKey}/${sessionId}:`, error);
       res.status(500).json({ error: "Failed to get session metadata" });
     }
@@ -244,9 +247,9 @@ async function _findSessionFileBySessionId(
 /**
  * Find archived sessions in a room directory.
  */
-async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: string): Promise<any[]> {
+async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: string): Promise<InternalSessionInfo[]> {
   const fs = await import("fs/promises");
-  const results: any[] = [];
+  const results: InternalSessionInfo[] = [];
 
   try {
     // Use resolveRoomSessionDir for validation and path traversal protection
@@ -262,7 +265,7 @@ async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: st
           results.push({
             id: metadata.sessionId,
             path: sessionFile,
-            firstMessage: metadata.firstMessage,
+            firstMessage: metadata.firstMessage || "",
           });
         } catch {
           // Skip invalid files

@@ -1,10 +1,18 @@
 import * as fs from "node:fs";
 import { join } from "node:path";
+import type { Api, Model } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
 import { RoomModelManager } from "./room-model-manager.js";
 import { type LiveRoomState, RoomStateManager } from "./room-state.js";
-import type { ModelClearResult, ModelStatus, ModelSwitchResult } from "./types.js";
+import type {
+  InternalSessionInfo,
+  ModelClearResult,
+  ModelStatus,
+  ModelSwitchResult,
+  RoomModelState,
+  SettingsJson,
+} from "./types.js";
 
 export interface PiSessionBackendOptions {
   sessionBaseDir: string;
@@ -177,7 +185,7 @@ export class PiSessionBackend {
    * Phase 2: Apply desired room model if it differs from active model.
    * This is called after session creation/resume and after !reset.
    */
-  private async applyDesiredRoomModelIfDifferent(roomId: string, session: any): Promise<void> {
+  private async applyDesiredRoomModelIfDifferent(roomId: string, session: AgentSession): Promise<void> {
     const desiredModelProfile = this.roomModelManager.resolveDesiredModel(roomId);
 
     if (!desiredModelProfile) {
@@ -544,7 +552,7 @@ export class PiSessionBackend {
     return result;
   }
 
-  async getArchivedSessions(): Promise<Array<{ path: string; id: string; firstMessage: string }>> {
+  async getArchivedSessions(): Promise<InternalSessionInfo[]> {
     const fs = await import("fs/promises");
 
     // Get active session paths for comparison
@@ -555,7 +563,7 @@ export class PiSessionBackend {
       }
     }
 
-    const archived: Array<{ path: string; id: string; firstMessage: string }> = [];
+    const archived: InternalSessionInfo[] = [];
 
     // Scan sessionBaseDir for all session files
     try {
@@ -612,7 +620,7 @@ export class PiSessionBackend {
    * Get archived sessions for a specific room.
    * These are session files in the room's directory that are not currently live.
    */
-  async getArchivedSessionsForRoom(roomId: string): Promise<Array<{ path: string; id: string; firstMessage: string }>> {
+  async getArchivedSessionsForRoom(roomId: string): Promise<InternalSessionInfo[]> {
     const roomSessionDir = this.getRoomSessionDir(roomId);
     const fs = await import("fs/promises");
 
@@ -620,7 +628,7 @@ export class PiSessionBackend {
     const liveState = this.roomStateManager.get(roomId);
     const liveSessionFile = liveState?.sessionFile;
 
-    const archived: Array<{ path: string; id: string; firstMessage: string }> = [];
+    const archived: InternalSessionInfo[] = [];
 
     // List all session files in the room directory
     try {
@@ -721,11 +729,11 @@ export class PiSessionBackend {
     return this.roomStateManager.getRoomIdByKey(roomKey);
   }
 
-  private _getModelRegistryForCurrentSession(): any {
+  private _getModelRegistryForCurrentSession(): ModelRegistry | null {
     // Get model registry from first available session
     for (const state of this.roomStateManager.listLive()) {
       // Access the session's modelRegistry
-      const session: any = state.session;
+      const session: AgentSession = state.session;
       if (session.modelRegistry) {
         return session.modelRegistry;
       }
@@ -736,14 +744,14 @@ export class PiSessionBackend {
   /**
    * Get the model for a given profile by scanning available models.
    */
-  private findModelByProfile(profile: string): any {
+  private findModelByProfile(profile: string): Model<Api> | null {
     const modelRegistry = this._getModelRegistryForCurrentSession();
     if (!modelRegistry) {
       return null;
     }
 
-    // Get all available models
-    const models: any[] = modelRegistry.models || [];
+    // Get all available models using public API
+    const models = modelRegistry.getAll();
 
     // Profile name to provider prefix mapping
     const profileToProviderPrefix: Record<string, string> = {
@@ -769,7 +777,7 @@ export class PiSessionBackend {
    * Read current global default settings from settings.json.
    * Returns null on error.
    */
-  private readSettings(): any {
+  private readSettings(): SettingsJson | null {
     try {
       const settingsPath = join(this.agentDir, "settings.json");
       const content = fs.readFileSync(settingsPath, "utf-8");
@@ -784,7 +792,7 @@ export class PiSessionBackend {
    * Write settings to agent directory.
    * Logs error but does not throw.
    */
-  private writeSettings(settings: any): void {
+  private writeSettings(settings: SettingsJson): void {
     try {
       const settingsPath = join(this.agentDir, "settings.json");
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
@@ -806,7 +814,7 @@ export class PiSessionBackend {
    * @returns The active model ID after applying
    * @throws If setModel fails, the global default is still restored
    */
-  private async applyModelWithGlobalDefaultRestore(session: any, targetModel: any): Promise<string> {
+  private async applyModelWithGlobalDefaultRestore(session: AgentSession, targetModel: Model<Api>): Promise<string> {
     // Read original global default
     const originalSettings = this.readSettings();
 
@@ -904,7 +912,7 @@ export class PiSessionBackend {
       );
     }
 
-    const session: any = roomState.session;
+    const session: AgentSession = roomState.session;
 
     // Find the target model
     const targetModel = this.findModelByProfile(requestedProfile);
@@ -1045,7 +1053,7 @@ export class PiSessionBackend {
    * Get the desired model for a room (from persisted state).
    * This works even if the room is not currently live.
    */
-  getDesiredModelForRoom(roomId: string): any {
+  getDesiredModelForRoom(roomId: string): RoomModelState | undefined {
     return this.roomModelManager.getDesiredModel(roomId);
   }
 

@@ -50,6 +50,11 @@ export interface ModelClearResult {
   previousDesiredModel?: string;
 }
 
+// Room info for control URL generation
+export interface RoomInfo {
+  roomKey: string;
+}
+
 // Phase 2: Per-room desired model state types
 export interface RoomModelState {
   desiredModel: string; // Profile name (e.g., "qwen27", "gemma4")
@@ -82,4 +87,110 @@ export interface RouterConfig {
   allowedUserIds: string[];
   agent: AgentBackend;
   sink: ReplySink;
+}
+
+// ============================================================================
+// Control Plane Response Types
+// ============================================================================
+
+/**
+ * Live room list item (GET /api/live/rooms)
+ */
+export interface LiveRoomListItem {
+  roomId: string;
+  roomKey: string;
+  sessionId?: string;
+  relativeSessionPath?: string;
+  isProcessing: boolean;
+  processingStartedAt?: string;
+}
+
+/**
+ * Live room detail (GET /api/live/rooms/:roomKey)
+ */
+export interface LiveRoomDetail {
+  roomId: string;
+  roomKey: string;
+  sessionId?: string;
+  relativeSessionPath?: string;
+  isProcessing: boolean;
+  processingStartedAt?: string;
+  model?: string;
+  thinkingLevel?: string;
+  toolNames?: string[];
+  snapshotAt?: string;
+  desiredModel?: string;
+  desiredResolvedModelId?: string;
+}
+
+/**
+ * Context response (GET /api/live/rooms/:roomKey/context)
+ */
+export interface ContextResponse {
+  roomId: string;
+  roomKey: string;
+  sessionId?: string;
+  relativeSessionPath?: string;
+  workingDirectory: string;
+  model?: string;
+  thinkingLevel?: string;
+  isProcessing: boolean;
+  isStreaming?: boolean;
+  processingStartedAt?: string;
+  toolNames: string[];
+  resourceLoaderType: string;
+  contextSources: any[];
+  generatedAt: string;
+  snapshotAt?: string;
+}
+
+/**
+ * Accepted prompt response (POST /api/live/rooms/:roomKey/prompt)
+ */
+export interface AcceptedPromptResponse {
+  accepted: true;
+  roomKey: string;
+  roomId: string;
+  sessionId?: string;
+  timestamp: string;
+}
+
+/**
+ * Archive session list item (GET /api/archive/rooms/:roomKey/sessions)
+ */
+export interface ArchiveSessionListItem {
+  sessionId: string;
+  relativeSessionPath: string;
+  firstMessage: string;
+}
+
+/**
+ * Archive session metadata response (GET /api/archive/rooms/:roomKey/sessions/:sessionId)
+ */
+export interface ArchiveSessionMetadataResponse {
+  sessionId?: string;
+  relativeSessionPath: string;
+  firstMessage: string;
+  isLive: false;
+}
+
+// ============================================================================
+// Backend Internal Types
+// ============================================================================
+
+/**
+ * Settings object as stored in settings.json.
+ */
+export interface SettingsJson {
+  globalDefault?: string;
+  [key: string]: any;
+}
+
+/**
+ * Internal session info for archived sessions.
+ */
+export interface InternalSessionInfo {
+  path: string;
+  id: string;
+  firstMessage: string;
 }

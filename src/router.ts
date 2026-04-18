@@ -1,22 +1,38 @@
 import { parseCommand } from "./command.js";
 import { isAllowedRoom, isAllowedUser } from "./policy.js";
-import type { IncomingMessage, RouterConfig } from "./types.js";
+import type {
+  IncomingMessage,
+  ModelClearResult,
+  ModelStatus,
+  ModelSwitchResult,
+  RoomInfo,
+  RouterConfig,
+} from "./types.js";
 
 // Interface for session reset capability
 export interface SessionResetter {
   reset(roomId: string): Promise<void>;
 }
 
+// Interface for session registry with room info lookup
+export interface SessionRegistry extends SessionResetter {
+  getLiveRoomInfo?(roomId: string): RoomInfo | undefined;
+}
+
 // Interface for model switching capability
 export interface ModelSwitcher {
-  switchModel?(roomId: string, profile: string): Promise<any>;
-  getModelStatus?(roomId: string): Promise<any>;
-  getModelStatusOrRehydrate?(roomId: string, options?: { rehydrateIfManaged?: boolean }): Promise<any>;
+  switchModel?(roomId: string, profile: string): Promise<ModelSwitchResult>;
+  getModelStatus?(roomId: string): Promise<ModelStatus | null | undefined>;
+  getModelStatusOrRehydrate?(
+    roomId: string,
+    options?: { rehydrateIfManaged?: boolean },
+  ): Promise<ModelStatus | null | undefined>;
+  clearDesiredModel?(roomId: string): Promise<ModelClearResult>;
 }
 
 export interface RouterOptions {
   config: RouterConfig;
-  sessionRegistry?: SessionResetter;
+  sessionRegistry?: SessionRegistry;
   modelSwitcher?: ModelSwitcher;
   controlUrl?: string; // Base URL for control server
   setTyping?: (roomId: string, typing: boolean) => Promise<void>;
@@ -104,7 +120,7 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
     case "command_control":
       if (options.controlUrl) {
         // Get room key for URL
-        const roomState = (options.sessionRegistry as any)?.getLiveRoomInfo?.(msg.roomId);
+        const roomState = options.sessionRegistry?.getLiveRoomInfo?.(msg.roomId);
         if (roomState?.roomKey) {
           // Primary: Assistant UI Spike
           const spikeUrl = `${options.controlUrl}/spike?room=${encodeURIComponent(roomState.roomKey)}`;
@@ -190,7 +206,7 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error(`[Router] Error getting model status:`, error);
           await config.sink.reply(msg.roomId, msg.eventId, "Failed to get model status.");
         }
@@ -258,7 +274,7 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
 
             await config.sink.reply(msg.roomId, msg.eventId, lines.join("\n"));
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error(`[Router] Error getting model status:`, error);
           await config.sink.reply(msg.roomId, msg.eventId, "Failed to get model status.");
         }
@@ -303,9 +319,10 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
             // Failed switch
             await config.sink.reply(msg.roomId, msg.eventId, `✗ ${result.message}`);
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error(`[Router] Error switching model:`, error);
-          await config.sink.reply(msg.roomId, msg.eventId, `Failed to switch model: ${error.message}`);
+          const message = error instanceof Error ? error.message : String(error);
+          await config.sink.reply(msg.roomId, msg.eventId, `Failed to switch model: ${message}`);
         }
       } else {
         await config.sink.reply(msg.roomId, msg.eventId, "Model switching not available.");
@@ -316,9 +333,9 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
     case "command_model_clear": {
       // Get model switcher from options
       const modelSwitcher = options.modelSwitcher;
-      if (modelSwitcher && (modelSwitcher as any).clearDesiredModel) {
+      if (modelSwitcher?.clearDesiredModel) {
         try {
-          const result = await (modelSwitcher as any).clearDesiredModel(msg.roomId);
+          const result = await modelSwitcher.clearDesiredModel(msg.roomId);
 
           if (result.success) {
             const lines: string[] = [];
@@ -337,9 +354,10 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           } else {
             await config.sink.reply(msg.roomId, msg.eventId, `✗ ${result.message}`);
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error(`[Router] Error clearing desired model:`, error);
-          await config.sink.reply(msg.roomId, msg.eventId, `Failed to clear desired model: ${error.message}`);
+          const message = error instanceof Error ? error.message : String(error);
+          await config.sink.reply(msg.roomId, msg.eventId, `Failed to clear desired model: ${message}`);
         }
       } else {
         await config.sink.reply(msg.roomId, msg.eventId, "Clear desired model not available.");
