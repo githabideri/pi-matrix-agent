@@ -76,13 +76,18 @@ export class RoomModelManager {
     }
 
     // Always load global default from settings.json (independent of room-models.json)
-    this.loadGlobalDefault();
+    this.refreshGlobalDefault();
   }
 
   /**
-   * Load the global default model from settings.json.
+   * Refresh the global default model from settings.json.
+   * This is called on each read to ensure the global default is never stale.
+   * It resets this.globalDefault to undefined before reading to ensure a fresh read.
    */
-  private loadGlobalDefault(): void {
+  private refreshGlobalDefault(): void {
+    // Reset to undefined before reading to ensure we always get a fresh value
+    this.globalDefault = undefined;
+
     try {
       const settingsPath = join(this.agentDir, "settings.json");
 
@@ -112,6 +117,33 @@ export class RoomModelManager {
     } catch (error: any) {
       console.error(`[RoomModelManager] Error loading settings.json: ${error.message}`);
     }
+  }
+
+  /**
+   * Get the bot-wide global default model profile.
+   * Refreshes from settings.json on each read to avoid serving stale data.
+   */
+  getGlobalDefault(): string | undefined {
+    // Refresh global default on each read to ensure it's never stale
+    this.refreshGlobalDefault();
+    return this.globalDefault;
+  }
+
+  /**
+   * Resolve the desired model for a room.
+   * Returns the room-specific desired model if set, otherwise the global default.
+   * The global default is refreshed on each read to avoid serving stale data.
+   */
+  resolveDesiredModel(roomId: string): string | undefined {
+    // First check for room-specific desired model (higher priority)
+    const roomState = this.store.rooms[roomId];
+    if (roomState?.desiredModel) {
+      return roomState.desiredModel;
+    }
+
+    // Fall back to global default, refreshing it first to ensure it's not stale
+    this.refreshGlobalDefault();
+    return this.globalDefault;
   }
 
   /**
@@ -162,29 +194,6 @@ export class RoomModelManager {
       this.save();
     }
     return previous;
-  }
-
-  /**
-   * Get the bot-wide global default model profile.
-   * This is read from settings.json on load.
-   */
-  getGlobalDefault(): string | undefined {
-    return this.globalDefault;
-  }
-
-  /**
-   * Resolve the desired model for a room.
-   * Returns the room-specific desired model if set, otherwise the global default.
-   */
-  resolveDesiredModel(roomId: string): string | undefined {
-    // First check for room-specific desired model
-    const roomState = this.store.rooms[roomId];
-    if (roomState?.desiredModel) {
-      return roomState.desiredModel;
-    }
-
-    // Fall back to global default
-    return this.globalDefault;
   }
 
   /**

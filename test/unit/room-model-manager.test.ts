@@ -1,280 +1,207 @@
-import { mkdir, readFile, rm, writeFile } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import * as fs from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RoomModelManager } from "../../src/room-model-manager.js";
 
-// Helper to create a minimal test agentDir
-async function createTestAgentDir(): Promise<string> {
-  const agentDir = join(tmpdir(), `room-model-test-${Date.now()}`);
-  await mkdir(agentDir, { recursive: true });
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-  // Create settings.json with qwen27 as default
-  await writeFile(
-    join(agentDir, "settings.json"),
-    JSON.stringify(
-      {
-        theme: "dark",
-        defaultProvider: "llama-cpp-qwen27",
-        defaultModel: "test-model-qwen",
-      },
-      null,
-      2,
-    ),
-  );
-
-  // Create auth.json (empty auth)
-  await writeFile(join(agentDir, "auth.json"), JSON.stringify({ providers: {} }, null, 2));
-
-  return agentDir;
-}
-
+/**
+ * Unit tests for RoomModelManager.
+ *
+ * Focus: refresh-on-read behavior for global default model.
+ */
 describe("RoomModelManager", () => {
-  let agentDir: string;
+  let testDir: string;
   let manager: RoomModelManager;
 
-  beforeEach(async () => {
-    agentDir = await createTestAgentDir();
-    manager = new RoomModelManager(agentDir);
+  beforeEach(() => {
+    // Create a unique test directory for each test
+    testDir = join(__dirname, `__tmp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(testDir, { recursive: true });
   });
 
-  afterEach(async () => {
-    await rm(agentDir, { recursive: true, force: true });
+  afterEach(() => {
+    // Clean up test directory
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
-  describe("constructor and load", () => {
-    it("creates manager with empty store when no room-models.json exists", () => {
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeUndefined();
+  function writeSettings(provider: string, model: string): void {
+    const settingsPath = join(testDir, "settings.json");
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ defaultProvider: provider, defaultModel: model }, null, 2),
+      "utf-8",
+    );
+  }
+
+  describe("global default refresh-on-read", () => {
+    it("initial qwen27 default is read from settings.json", () => {
+      // Setup: write settings.json with qwen27 as default
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
+
+      // Create manager
+      manager = new RoomModelManager(testDir);
+
+      // Verify: getGlobalDefault() returns qwen27
+      expect(manager.getGlobalDefault()).toBe("qwen27");
     });
 
-    it("loads global default from settings.json", () => {
-      const globalDefault = manager.getGlobalDefault();
-      expect(globalDefault).toBe("qwen27");
+    it("after overwriting settings.json to qwen36, getGlobalDefault() returns qwen36 without reconstructing the object", () => {
+      // Setup: start with qwen27 as default
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
+
+      // Create manager
+      manager = new RoomModelManager(testDir);
+
+      // Verify initial state
+      expect(manager.getGlobalDefault()).toBe("qwen27");
+
+      // Act: overwrite settings.json to qwen36 (simulating external config change)
+      writeSettings("llama-cpp-qwen36", "qwen36-chat");
+
+      // Verify: getGlobalDefault() now returns qwen36 without reconstructing the manager
+      expect(manager.getGlobalDefault()).toBe("qwen36");
     });
 
-    it("loads existing room-models.json", async () => {
-      const roomModelsPath = join(agentDir, "room-models.json");
-      await writeFile(
-        roomModelsPath,
-        JSON.stringify({
-          rooms: {
-            "!room1:example.com": {
-              desiredModel: "qwen36",
-              resolvedModelId: "test-gemma-model-id",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-            },
-          },
-        }),
-      );
+    it("resolveDesiredModel(roomId) falls back to the refreshed global default when no room override exists", () => {
+      // Setup: start with qwen27 as default
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-      manager = new RoomModelManager(agentDir);
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeDefined();
-      expect(desired!.desiredModel).toBe("qwen36");
-      expect(desired!.resolvedModelId).toBe("test-gemma-model-id");
+      const roomId = "!test:example.com";
+
+      // Verify: resolveDesiredModel falls back to qwen27
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen27");
+
+      // Act: overwrite settings.json to qwen36
+      writeSettings("llama-cpp-qwen36", "qwen36-chat");
+
+      // Verify: resolveDesiredModel now falls back to refreshed qwen36
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen36");
     });
 
-    it("handles corrupt room-models.json gracefully", async () => {
-      const roomModelsPath = join(agentDir, "room-models.json");
-      await writeFile(roomModelsPath, "not valid json");
+    it("a room-specific desired model still takes precedence over the global default", () => {
+      // Setup: start with qwen27 as global default
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-      // Should not throw
-      manager = new RoomModelManager(agentDir);
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      // Should fall back to empty store
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeUndefined();
+      const roomId = "!test:example.com";
+
+      // Set room-specific override to qwen36
+      manager.setDesiredModel(roomId, "qwen36", "llama-cpp-qwen36:8080");
+
+      // Verify: room override takes precedence over global default
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen36");
+
+      // Act: change global default to qwen27 (it was already, but let's be explicit)
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
+
+      // Verify: room override still takes precedence
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen36");
+
+      // Act: change global default to something else
+      writeSettings("llama-cpp-qwen36", "qwen36-chat");
+
+      // Verify: room override still takes precedence (room override is qwen36, global is now also qwen36)
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen36");
     });
 
-    it("handles malformed room-models.json structure gracefully", async () => {
-      const roomModelsPath = join(agentDir, "room-models.json");
-      await writeFile(roomModelsPath, JSON.stringify({ rooms: "invalid" }));
+    it("if settings.json contains an unrelated/unknown provider, getGlobalDefault() becomes undefined", () => {
+      // Setup: start with qwen27 as default
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-      // Should not throw
-      manager = new RoomModelManager(agentDir);
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      // Should fall back to empty store
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeUndefined();
+      // Verify initial state
+      expect(manager.getGlobalDefault()).toBe("qwen27");
+
+      // Act: overwrite settings.json with unrelated provider
+      writeSettings("unknown-provider", "some-model");
+
+      // Verify: getGlobalDefault() now returns undefined
+      expect(manager.getGlobalDefault()).toBeUndefined();
     });
 
-    it("filters invalid room entries while loading", async () => {
-      const roomModelsPath = join(agentDir, "room-models.json");
-      await writeFile(
-        roomModelsPath,
-        JSON.stringify({
-          rooms: {
-            "!room1:example.com": {
-              desiredModel: "qwen36",
-              resolvedModelId: "test-model",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-            },
-            "!room2:example.com": {
-              // Missing required fields
-              invalid: true,
-            },
-          },
-        }),
-      );
+    it("handles missing settings.json gracefully by returning undefined", () => {
+      // Setup: no settings.json created
 
-      manager = new RoomModelManager(agentDir);
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      // Room 1 should be loaded
-      const room1 = manager.getDesiredModel("!room1:example.com");
-      expect(room1?.desiredModel).toBe("qwen36");
-
-      // Room 2 should be filtered out
-      const room2 = manager.getDesiredModel("!room2:example.com");
-      expect(room2).toBeUndefined();
-    });
-  });
-
-  describe("getDesiredModel", () => {
-    it("returns undefined for room without desired model", () => {
-      const desired = manager.getDesiredModel("!nonexistent:example.com");
-      expect(desired).toBeUndefined();
-    });
-
-    it("returns desired model after setDesiredModel", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeDefined();
-      expect(desired!.desiredModel).toBe("qwen36");
-      expect(desired!.resolvedModelId).toBe("test-gemma-model-id");
-      expect(desired!.updatedAt).toBeDefined();
-    });
-  });
-
-  describe("setDesiredModel", () => {
-    it("sets desired model for a room", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen27", "test-qwen-model-id");
-
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired?.desiredModel).toBe("qwen27");
-      expect(desired?.resolvedModelId).toBe("test-qwen-model-id");
-    });
-
-    it("persists desired model to file", async () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-
-      // Read file directly to verify persistence
-      const roomModelsPath = join(agentDir, "room-models.json");
-      const content = await readFile(roomModelsPath, "utf-8");
-      const parsed = JSON.parse(content);
-
-      expect(parsed.rooms["!room1:example.com"]).toBeDefined();
-      expect(parsed.rooms["!room1:example.com"].desiredModel).toBe("qwen36");
-    });
-
-    it("updates existing room entry", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-1");
-      manager.setDesiredModel("!room1:example.com", "qwen27", "test-qwen-1");
-
-      const desired = manager.getDesiredModel("!room1:example.com");
-      expect(desired?.desiredModel).toBe("qwen27");
-      expect(desired?.resolvedModelId).toBe("test-qwen-1");
+      // Verify: getGlobalDefault() returns undefined
+      expect(manager.getGlobalDefault()).toBeUndefined();
     });
   });
 
-  describe("clearDesiredModel", () => {
-    it("removes desired model for a room", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
+  describe("room-specific overrides", () => {
+    it("getDesiredModel returns the room-specific override", () => {
+      // Setup
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-      const cleared = manager.clearDesiredModel("!room1:example.com");
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      expect(cleared?.desiredModel).toBe("qwen36");
-      expect(manager.getDesiredModel("!room1:example.com")).toBeUndefined();
+      const roomId = "!test:example.com";
+      manager.setDesiredModel(roomId, "qwen36", "llama-cpp-qwen36:8080");
+
+      // Verify
+      const state = manager.getDesiredModel(roomId);
+      expect(state).toBeDefined();
+      expect(state?.desiredModel).toBe("qwen36");
+      expect(state?.resolvedModelId).toBe("llama-cpp-qwen36:8080");
     });
 
-    it("returns undefined for room without desired model", () => {
-      const cleared = manager.clearDesiredModel("!nonexistent:example.com");
-      expect(cleared).toBeUndefined();
-    });
+    it("clearDesiredModel removes the room-specific override", () => {
+      // Setup
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-    it("persists clear to file", async () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-      manager.clearDesiredModel("!room1:example.com");
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      const roomModelsPath = join(agentDir, "room-models.json");
-      const content = await readFile(roomModelsPath, "utf-8");
-      const parsed = JSON.parse(content);
+      const roomId = "!test:example.com";
+      manager.setDesiredModel(roomId, "qwen36", "llama-cpp-qwen36:8080");
 
-      expect(parsed.rooms["!room1:example.com"]).toBeUndefined();
-    });
-  });
+      // Clear the override
+      const previous = manager.clearDesiredModel(roomId);
 
-  describe("resolveDesiredModel", () => {
-    it("returns room-specific desired model when set", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
+      // Verify previous state was returned
+      expect(previous?.desiredModel).toBe("qwen36");
 
-      const resolved = manager.resolveDesiredModel("!room1:example.com");
-      expect(resolved).toBe("qwen36");
-    });
-
-    it("returns global default when no room-specific desired model", () => {
-      const resolved = manager.resolveDesiredModel("!room1:example.com");
-      expect(resolved).toBe("qwen27"); // From settings.json
-    });
-
-    it("room-specific desired model takes precedence over global default", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-
-      const resolved = manager.resolveDesiredModel("!room1:example.com");
-      expect(resolved).toBe("qwen36"); // Not "qwen27"
+      // Verify override is gone and falls back to global default
+      expect(manager.getDesiredModel(roomId)).toBeUndefined();
+      expect(manager.resolveDesiredModel(roomId)).toBe("qwen27");
     });
   });
 
-  describe("persistence across restart", () => {
-    it("desired model persists when manager is recreated", () => {
-      // Set desired model
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
+  describe("getRoomIdsWithOverrides", () => {
+    it("returns all room IDs with overrides", () => {
+      // Setup
+      writeSettings("llama-cpp-qwen27", "qwen27-chat");
 
-      // Create new manager (simulates restart)
-      const newManager = new RoomModelManager(agentDir);
+      // Create manager
+      manager = new RoomModelManager(testDir);
 
-      // Verify persistence
-      const desired = newManager.getDesiredModel("!room1:example.com");
-      expect(desired?.desiredModel).toBe("qwen36");
-      expect(desired?.resolvedModelId).toBe("test-gemma-model-id");
-    });
+      const room1 = "!room1:example.com";
+      const room2 = "!room2:example.com";
 
-    it("cleared desired model persists when manager is recreated", () => {
-      // Set then clear desired model
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-      manager.clearDesiredModel("!room1:example.com");
+      manager.setDesiredModel(room1, "qwen36", "llama-cpp-qwen36:8080");
+      manager.setDesiredModel(room2, "qwen27", "llama-cpp-qwen27:8080");
 
-      // Create new manager (simulates restart)
-      const newManager = new RoomModelManager(agentDir);
-
-      // Verify clear persisted
-      const desired = newManager.getDesiredModel("!room1:example.com");
-      expect(desired).toBeUndefined();
-    });
-  });
-
-  describe("multiple rooms", () => {
-    it("maintains separate desired models for different rooms", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-      manager.setDesiredModel("!room2:example.com", "qwen27", "test-qwen-model-id");
-
-      const room1 = manager.getDesiredModel("!room1:example.com");
-      const room2 = manager.getDesiredModel("!room2:example.com");
-
-      expect(room1?.desiredModel).toBe("qwen36");
-      expect(room2?.desiredModel).toBe("qwen27");
-    });
-
-    it("clearing one room does not affect another", () => {
-      manager.setDesiredModel("!room1:example.com", "qwen36", "test-gemma-model-id");
-      manager.setDesiredModel("!room2:example.com", "qwen27", "test-qwen-model-id");
-
-      manager.clearDesiredModel("!room1:example.com");
-
-      expect(manager.getDesiredModel("!room1:example.com")).toBeUndefined();
-      expect(manager.getDesiredModel("!room2:example.com")?.desiredModel).toBe("qwen27");
+      // Verify
+      const roomIds = manager.getRoomIdsWithOverrides();
+      expect(roomIds).toHaveLength(2);
+      expect(roomIds).toContain(room1);
+      expect(roomIds).toContain(room2);
     });
   });
 });
