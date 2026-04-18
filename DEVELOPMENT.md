@@ -205,12 +205,12 @@ git remote -v
 
 Example output:
 ```
-origin    git@github.com:mariozechner/pi-matrix-agent.git (fetch)
-origin    git@github.com:mariozechner/pi-matrix-agent.git (push)
-github    git@github.com:mariozechner/pi-matrix-agent.git (fetch)
-github    git@github.com:mariozechner/pi-matrix-agent.git (push)
-codeberg  git@codeberg.org:mariozechner/pi-matrix-agent.git (fetch)
-codeberg  git@codeberg.org:mariozechner/pi-matrix-agent.git (push)
+origin    git@example.com:username/repo.git (fetch)
+origin    git@example.com:username/repo.git (push)
+github    git@github.com:username/repo.git (fetch)
+github    git@github.com:username/repo.git (push)
+codeberg  git@codeberg.org:username/repo.git (fetch)
+codeberg  git@codeberg.org:username/repo.git (push)
 ```
 
 ### Push Workflow

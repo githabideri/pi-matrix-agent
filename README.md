@@ -512,7 +512,7 @@ pi-matrix-agent/
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Watch mode development |
-| `npm run check` | TypeScript type check |
+| `npm run check` | Biome validation + TypeScript type check |
 | `npm run build` | Compile to JavaScript |
 | `npm test` | Run unit tests |
 | `npm run verify` | Full verification (test + check + build) |
@@ -695,8 +695,6 @@ CONTROL_PUBLIC_URL=https://your-node.your-tailnet.ts.net ./scripts/run-bot.sh
 ```
 
 **Important:** `CONTROL_PUBLIC_URL` must be set **at process startup** - setting it later won't affect an already-running bot.
-
-**Important**: `CONTROL_PUBLIC_URL` must be set **at process startup** - setting it later won't affect an already-running bot.
 
 ## License
 
