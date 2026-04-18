@@ -57,7 +57,7 @@ export interface RoomInfo {
 
 // Phase 2: Per-room desired model state types
 export interface RoomModelState {
-  desiredModel: string; // Profile name (e.g., "qwen27", "gemma4")
+  desiredModel: string; // Profile name (e.g., "qwen27", "qwen36")
   resolvedModelId?: string; // Resolved model ID
   updatedAt: string; // ISO timestamp
 }
@@ -139,7 +139,7 @@ export interface ContextResponse {
   processingStartedAt?: string;
   toolNames: string[];
   resourceLoaderType: string;
-  contextSources: any[];
+  contextSources: unknown[];
   generatedAt: string;
   snapshotAt?: string;
 }

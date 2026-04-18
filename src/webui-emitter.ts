@@ -12,6 +12,7 @@
  */
 
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { Response } from "express";
 import type { WebUIEvent } from "./webui-types.js";
 import { generateTurnId } from "./webui-types.js";
 
@@ -281,7 +282,7 @@ export class WebUIEmitter {
 /**
  * Create an SSE response handler that streams WebUI events.
  */
-export function attachEmitterToSSE(res: any, emitter: WebUIEmitter): () => void {
+export function attachEmitterToSSE(res: Response, emitter: WebUIEmitter): () => void {
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
