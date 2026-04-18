@@ -105,7 +105,7 @@ fi
 # Test 4: Archive endpoint returns empty array for non-existent room
 echo ""
 echo "Test 4: Archive endpoint returns empty array for non-existent room"
-RESPONSE=$(curl -s "http://127.0.0.1:$TEMP_PORT/api/archive/rooms/nonexistent/sessions")
+RESPONSE=$(curl -s "http://127.0.0.1:$TEMP_PORT/api/archive/rooms/abcd1234/sessions")
 if [ "$RESPONSE" = "[]" ]; then
     echo "✓ Empty array returned for non-existent archive"
 else

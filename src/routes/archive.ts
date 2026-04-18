@@ -3,6 +3,57 @@ import type { PiSessionBackend } from "../pi-backend.js";
 import { extractSessionIdFromFilename, parseSessionMetadata, RoomStateManager } from "../room-state.js";
 import { parseSessionFile } from "../transcript.js";
 
+// Validation patterns
+const ROOM_KEY_PATTERN = /^[0-9a-f]+$/;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Validates that roomKey contains only lowercase hexadecimal characters.
+ */
+export function isValidRoomKey(roomKey: string): boolean {
+  return typeof roomKey === "string" && ROOM_KEY_PATTERN.test(roomKey);
+}
+
+/**
+ * Validates that sessionId contains only safe alphanumeric and limited special characters.
+ */
+export function isValidSessionId(sessionId: string): boolean {
+  return typeof sessionId === "string" && SESSION_ID_PATTERN.test(sessionId);
+}
+
+/**
+ * Resolves and validates a room session directory path.
+ *
+ * - Validates roomKey format
+ * - Resolves sessionBaseDir to absolute path
+ * - Resolves room-${roomKey} underneath it
+ * - Verifies the resolved path stays inside the base dir (path traversal protection)
+ *
+ * @throws {Error} if roomKey is invalid or path escapes base dir
+ */
+export async function resolveRoomSessionDir(sessionBaseDir: string, roomKey: string): Promise<string> {
+  if (!isValidRoomKey(roomKey)) {
+    throw new Error(`Invalid room key: ${roomKey}`);
+  }
+
+  const path = await import("path");
+
+  // Resolve base dir to absolute path
+  const resolvedBaseDir = path.resolve(sessionBaseDir);
+
+  // Construct the room session directory path
+  const roomSessionDir = path.join(resolvedBaseDir, `room-${roomKey}`);
+
+  // Resolve to absolute and verify it stays inside base dir
+  const resolvedRoomDir = path.resolve(roomSessionDir);
+
+  if (!resolvedRoomDir.startsWith(resolvedBaseDir + path.sep) && resolvedRoomDir !== resolvedBaseDir) {
+    throw new Error(`Path traversal detected: ${resolvedRoomDir} escapes ${resolvedBaseDir}`);
+  }
+
+  return resolvedRoomDir;
+}
+
 export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string) {
   const router = Router();
 
@@ -16,6 +67,11 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
   router.get("/:roomKey/sessions", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     console.log(`[ARCHIVE] Listing sessions for roomKey: ${roomKey}`);
+
+    // Validate roomKey before any file I/O
+    if (!isValidRoomKey(roomKey)) {
+      return res.status(400).json({ error: "Invalid room key" });
+    }
 
     // First try to find the room in live rooms
     const roomId = piBackend.getRoomIdByKey(roomKey);
@@ -54,6 +110,16 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
     const roomKey = req.params.roomKey;
     const sessionId = req.params.sessionId;
 
+    // Validate roomKey before any file I/O
+    if (!isValidRoomKey(roomKey)) {
+      return res.status(400).json({ error: "Invalid room key" });
+    }
+
+    // Validate sessionId before any file I/O
+    if (!isValidSessionId(sessionId)) {
+      return res.status(400).json({ error: "Invalid session id" });
+    }
+
     try {
       // Find the session file directly in the room directory
       const sessionFile = await findSessionFileInRoomDir(roomKey, sessionId, sessionBaseDir);
@@ -81,6 +147,16 @@ export function routeArchive(piBackend: PiSessionBackend, sessionBaseDir: string
   router.get("/:roomKey/sessions/:sessionId/transcript", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;
     const sessionId = req.params.sessionId;
+
+    // Validate roomKey before any file I/O
+    if (!isValidRoomKey(roomKey)) {
+      return res.status(400).json({ error: "Invalid room key" });
+    }
+
+    // Validate sessionId before any file I/O
+    if (!isValidSessionId(sessionId)) {
+      return res.status(400).json({ error: "Invalid session id" });
+    }
 
     try {
       // Find the session file directly in the room directory
@@ -130,23 +206,23 @@ async function findSessionFileInRoomDir(
   sessionBaseDir: string,
 ): Promise<string | null> {
   const fs = await import("fs/promises");
-  const path = await import("path");
-
-  const roomSessionDir = path.join(sessionBaseDir, `room-${roomKey}`);
 
   try {
+    // Use resolveRoomSessionDir for validation and path traversal protection
+    const roomSessionDir = await resolveRoomSessionDir(sessionBaseDir, roomKey);
+
     const entries = await fs.readdir(roomSessionDir);
 
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) {
         const fileId = extractSessionIdFromFilename(entry);
         if (fileId === sessionId || entry.startsWith(`${sessionId}_`)) {
-          return path.join(roomSessionDir, entry);
+          return `${roomSessionDir}/${entry}`;
         }
       }
     }
   } catch {
-    // Directory might not exist
+    // Directory might not exist or invalid roomKey
   }
 
   return null;
@@ -170,17 +246,17 @@ async function _findSessionFileBySessionId(
  */
 async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: string): Promise<any[]> {
   const fs = await import("fs/promises");
-  const path = await import("path");
-
-  const roomSessionDir = path.join(sessionBaseDir, `room-${roomKey}`);
   const results: any[] = [];
 
   try {
+    // Use resolveRoomSessionDir for validation and path traversal protection
+    const roomSessionDir = await resolveRoomSessionDir(sessionBaseDir, roomKey);
+
     const entries = await fs.readdir(roomSessionDir);
 
     for (const entry of entries) {
       if (entry.endsWith(".jsonl")) {
-        const sessionFile = path.join(roomSessionDir, entry);
+        const sessionFile = `${roomSessionDir}/${entry}`;
         try {
           const metadata = await parseSessionMetadata(sessionFile, sessionBaseDir);
           results.push({
@@ -194,7 +270,7 @@ async function findArchivedSessionsInRoomDir(roomKey: string, sessionBaseDir: st
       }
     }
   } catch {
-    // Directory might not exist
+    // Directory might not exist or invalid roomKey
   }
 
   return results;
