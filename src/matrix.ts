@@ -1,4 +1,6 @@
+import { marked } from "marked";
 import { MatrixClient, SimpleFsStorageProvider } from "matrix-bot-sdk";
+import sanitizeHtml from "sanitize-html";
 import type { IncomingMessage, ReplySink } from "./types.js";
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
@@ -189,46 +191,56 @@ export class MatrixTransport implements ReplySink {
   }
 
   /**
-   * Convert plain text to safe HTML for Matrix formatted_body.
-   * Basic conversion: newlines to <br>, code blocks preserved.
-   * Not a full markdown renderer - just makes common patterns readable.
+   * Convert markdown to safe HTML for Matrix formatted_body.
+   * Uses marked for GFM parsing and sanitize-html for XSS protection.
+   *
+   * Supports: h1-h6, paragraphs, lists (bullet/numbered), code blocks,
+   * inline code, emphasis, strong, links, tables, blockquotes.
    */
   private toSafeHtml(text: string): string {
-    // Escape HTML entities first
-    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Parse markdown with GFM support
+    const rawHtml = marked.parse(text, {
+      async: false,
+      breaks: true, // Convert line breaks to <br>
+      gfm: true, // GitHub Flavored Markdown
+    }) as string;
 
-    // Convert code blocks (```code```) to <pre><code></code></pre>
-    html = html.replace(/```([\s\S]*?)```/g, (_match, code) => {
-      return `<pre><code>${code.trim()}</code></pre>`;
+    // Sanitize HTML for Matrix formatted_body
+    // Matrix supports a limited set of safe HTML tags
+    const sanitizedHtml = sanitizeHtml(rawHtml, {
+      allowedTags: [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "br",
+        "ul",
+        "ol",
+        "li",
+        "pre",
+        "code",
+        "strong",
+        "em",
+        "code",
+        "a",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "blockquote",
+      ],
+      allowedAttributes: {
+        a: ["href"],
+      },
+      disallowedTagsMode: "discard", // Remove disallowed tags but keep content
     });
 
-    // Convert inline code (`code`) to <code></code>
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-    // Convert headers
-    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-
-    // Convert bold (**text**)
-    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-
-    // Convert italic (*text*)
-    html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-
-    // Convert links [text](url)
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-
-    // Convert paragraphs (double newlines)
-    html = html.replace(/\n\n/g, "</p><p>");
-
-    // Convert single newlines to breaks
-    html = html.replace(/\n/g, "<br>");
-
-    // Wrap in paragraph tags
-    html = `<p>${html}</p>`;
-
-    return html;
+    return sanitizedHtml;
   }
 
   async stop(): Promise<void> {

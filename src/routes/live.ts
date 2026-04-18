@@ -226,16 +226,16 @@ export function routeLive(
       .prompt(roomId, text)
       .then((response) => {
         console.log(`[PROMPT] Completed for room ${roomKey}, response length: ${response.length}`);
-        // Mirror the final response to Matrix (simple format, no rich formatting)
+        // Mirror the final assistant response to Matrix with rich formatting
         if (matrixTransport && response) {
           matrixTransport
-            .reply(roomId, "", response, { webUI: true })
+            .reply(roomId, "", response)
             .catch((err) => console.warn(`[PROMPT] Failed to mirror response to Matrix:`, err));
         }
       })
       .catch((error) => {
         console.error(`[PROMPT] Error for room ${roomKey}:`, error);
-        // Optionally mirror error to Matrix
+        // Mirror error to Matrix (plain text, prefixed with [WebUI])
         if (matrixTransport) {
           const errorMsg = `[WebUI] Error: ${error instanceof Error ? error.message : String(error)}`;
           matrixTransport

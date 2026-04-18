@@ -31,12 +31,15 @@
     "@mariozechner/pi-coding-agent": "^0.66.1",
     "ejs": "^5.0.2",
     "express": "^5.2.1",
-    "matrix-bot-sdk": "^0.6.2"
+    "marked": "^18.0.2",
+    "matrix-bot-sdk": "^0.6.2",
+    "sanitize-html": "^2.17.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.11",
     "@playwright/test": "^1.59.1",
     "@types/node": "^20.10.0",
+    "@types/sanitize-html": "^2.16.1",
     "axios": "^1.15.0",
     "husky": "^9.1.7",
     "tsx": "^4.7.0",
