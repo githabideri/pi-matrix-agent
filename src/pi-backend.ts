@@ -1058,6 +1058,14 @@ export class PiSessionBackend {
   }
 
   /**
+   * Set the desired model for a room (persisted state).
+   * This works even if the room is not currently live.
+   */
+  setDesiredModelForRoom(roomId: string, desiredModel: string, resolvedModelId: string): void {
+    this.roomModelManager.setDesiredModel(roomId, desiredModel, resolvedModelId);
+  }
+
+  /**
    * Check if a room has a persisted desired model override.
    * This is used to determine if a room should be rehydrated.
    */
