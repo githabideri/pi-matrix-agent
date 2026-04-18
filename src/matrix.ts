@@ -3,6 +3,40 @@ import type { IncomingMessage, ReplySink } from "./types.js";
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
 
+/**
+ * Type guard that checks if a Matrix message type is accepted (text or notice).
+ * Only `m.text` and `m.notice` are passed to the router.
+ */
+export function isAcceptedMatrixMsgType(msgtype: unknown): msgtype is "m.text" | "m.notice" {
+  return msgtype === "m.text" || msgtype === "m.notice";
+}
+
+/**
+ * Extract the text body from an incoming Matrix event.
+ * Returns null if the event is not a valid text message.
+ *
+ * Requirements:
+ * - msgtype must be "m.text" or "m.notice"
+ * - body must be a non-empty string (after trimming)
+ */
+export function extractIncomingTextBody(event: any): string | null {
+  const msgtype = event?.content?.msgtype;
+  if (!isAcceptedMatrixMsgType(msgtype)) {
+    return null;
+  }
+
+  const body = event?.content?.body;
+  if (typeof body !== "string") {
+    return null;
+  }
+
+  if (body.trim() === "") {
+    return null;
+  }
+
+  return body;
+}
+
 export class MatrixTransport implements ReplySink {
   private client: MatrixClient;
   private allowedRoomIds: string[];
@@ -85,9 +119,10 @@ export class MatrixTransport implements ReplySink {
 
     // Set up listeners BEFORE starting
     this.client.on("room.message", async (roomId: string, event: any) => {
-      console.log(
-        `[MatrixTransport] Received message in ${roomId} from ${event.sender}: ${event.content?.body?.slice(0, 50)}`,
-      );
+      // Safe preview: slice if string, otherwise use placeholder
+      const body = event.content?.body;
+      const preview = typeof body === "string" ? body.slice(0, 50) : "[non-text event]";
+      console.log(`[MatrixTransport] Received message in ${roomId} from ${event.sender}: ${preview}`);
       // Filter to allowed rooms only
       if (!this.allowedRoomIds.includes(roomId)) {
         console.log(`[MatrixTransport] Ignoring - room not allowed`);
@@ -99,11 +134,18 @@ export class MatrixTransport implements ReplySink {
         return;
       }
 
+      // Extract and validate the text body
+      const textBody = extractIncomingTextBody(event);
+      if (textBody === null) {
+        console.debug(`[MatrixTransport] Ignoring non-text or empty message`);
+        return;
+      }
+
       const msg: IncomingMessage = {
         roomId: roomId,
         eventId: event.event_id,
         sender: event.sender,
-        body: event.content?.body || "",
+        body: textBody,
       };
 
       // Call the message handler
