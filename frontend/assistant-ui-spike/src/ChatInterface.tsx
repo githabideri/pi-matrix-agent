@@ -290,7 +290,18 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     setIsNearBottom(checkIsNearBottom());
   }, [checkIsNearBottom]);
 
-  // Scroll to bottom when messages change - only if user is near bottom
+  // Generate a content hash that changes when any message content changes
+  // This ensures scroll updates trigger on both new messages AND content growth
+  const contentHash = React.useMemo(() => {
+    let hash = liveState.messages.length;
+    for (const msg of liveState.messages) {
+      hash += (msg.content as any)?.length || 0;
+      hash += (msg.thinking?.length || 0) || 0;
+    }
+    return hash;
+  }, [liveState.messages]);
+
+  // Scroll to bottom when messages change or content grows - only if user is near bottom
   useEffect(() => {
     if (isNearBottom && messagesEndRef.current) {
       // Small delay to ensure DOM is updated
@@ -300,7 +311,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
         });
       });
     }
-  }, [liveState.messages.length, isNearBottom]);
+  }, [contentHash, isNearBottom]);
 
   // Listen to scroll events to update isNearBottom
   useEffect(() => {

@@ -56,6 +56,10 @@ export interface AdapterState {
   activeToolCalls: Map<string, ToolCallState>;
   // Track pending user messages for deduplication
   pendingUserMessages?: Set<string>;  // Set of prompt texts awaiting server confirmation
+  // Turn-bound streaming state: ID of the assistant message currently being streamed
+  currentAssistantMessageId?: string;
+  // Current turn ID for detecting turn boundaries
+  currentTurnId?: string;
 }
 
 /**
@@ -276,6 +280,13 @@ export function processEvent(
       };
 
     case 'turn_start': {
+      // Clear the current assistant message ID for the new turn
+      // This ensures deltas will create a new assistant message instead of appending to the old one
+      const clearedState = {
+        ...state,
+        currentAssistantMessageId: undefined,
+        currentTurnId: event.turnId,  // Set the turn ID for this turn
+      };
       if (event.promptPreview) {
         // Check for duplicate - if we already have a user message with this text,
         // or if it's in pendingUserMessages, skip adding it
@@ -284,8 +295,8 @@ export function processEvent(
         const promptForComparison = event.promptPreview.startsWith('[WebUI] ') 
           ? event.promptPreview.substring(8) 
           : event.promptPreview;
-        const existingMessage = findUserMessageByText(state.messages, promptForComparison);
-        const isPending = state.pendingUserMessages?.has(promptForComparison) || false;
+        const existingMessage = findUserMessageByText(clearedState.messages, promptForComparison);
+        const isPending = clearedState.pendingUserMessages?.has(promptForComparison) || false;
         
         if (!existingMessage && !isPending) {
           const userMessage: InternalMessage = {
@@ -295,8 +306,8 @@ export function processEvent(
             createdAt: new Date(event.timestamp),
           };
           return {
-            ...state,
-            messages: [...state.messages, userMessage],
+            ...clearedState,
+            messages: [...clearedState.messages, userMessage],
             isProcessing: true,
           };
         }
@@ -305,23 +316,29 @@ export function processEvent(
         // This runs when either: message exists in list, OR it's marked as pending
         // Both cases mean the prompt is accounted for and should be removed from pending
         if (existingMessage || isPending) {
-          const newPendingUserMessages = new Set(state.pendingUserMessages || []);
+          const newPendingUserMessages = new Set(clearedState.pendingUserMessages || []);
           newPendingUserMessages.delete(promptForComparison);
-          return { ...state, isProcessing: true, pendingUserMessages: newPendingUserMessages };
+          return { ...clearedState, isProcessing: true, pendingUserMessages: newPendingUserMessages };
         }
       }
-      return { ...state, isProcessing: true };
+      return { ...clearedState, isProcessing: true };
     }
 
     case 'user_message': {
       // Handle user_message event (for Matrix-originated messages where promptPreview
       // wasn't available in turn_start)
+      // Clear current assistant message ID if set, to prepare for new turn's assistant response
+      const userMessageClearedState = {
+        ...state,
+        currentAssistantMessageId: undefined,
+        currentTurnId: event.turnId,  // Set the turn ID for this turn
+      };
       // Strip [WebUI] prefix for comparison since optimistic update uses trimmed text
       const promptForComparison = event.promptPreview.startsWith('[WebUI] ') 
         ? event.promptPreview.substring(8) 
         : event.promptPreview;
-      const existingMessage = findUserMessageByText(state.messages, promptForComparison);
-      const isPending = state.pendingUserMessages?.has(promptForComparison) || false;
+      const existingMessage = findUserMessageByText(userMessageClearedState.messages, promptForComparison);
+      const isPending = userMessageClearedState.pendingUserMessages?.has(promptForComparison) || false;
       
       if (!existingMessage && !isPending) {
         const userMessage: InternalMessage = {
@@ -331,8 +348,8 @@ export function processEvent(
           createdAt: new Date(event.timestamp),
         };
         return {
-          ...state,
-          messages: [...state.messages, userMessage],
+          ...userMessageClearedState,
+          messages: [...userMessageClearedState.messages, userMessage],
         };
       }
       
@@ -340,22 +357,46 @@ export function processEvent(
       // This runs when either: message exists in list, OR it's marked as pending
       // Both cases mean the prompt is accounted for and should be removed from pending
       if (existingMessage || isPending) {
-        const newPendingUserMessages = new Set(state.pendingUserMessages || []);
+        const newPendingUserMessages = new Set(userMessageClearedState.pendingUserMessages || []);
         newPendingUserMessages.delete(promptForComparison);
-        return { ...state, pendingUserMessages: newPendingUserMessages };
+        return { ...userMessageClearedState, pendingUserMessages: newPendingUserMessages };
       }
-      return state;
+      return userMessageClearedState;
     }
 
     case 'message_update': {
       const delta = event.content.delta;
       
+      // Check if this is a new turn - if so, we must create a new assistant message
+      // Only consider it a new turn if both currentTurnId and event.turnId are set and different
+      const isNewTurn = state.currentTurnId != null && 
+                        event.turnId != null && 
+                        state.currentTurnId !== event.turnId;
+      
+      // Check if this is the first message update for this turn (no active assistant message)
+      const isFirstUpdateForTurn = state.currentTurnId == event.turnId && 
+                                   !state.currentAssistantMessageId;
+      
+      // Determine the target assistant message for this delta
+      // Use currentAssistantMessageId if set AND this is not a new turn AND not first update
+      let targetMessageId = !isNewTurn && !isFirstUpdateForTurn && state.currentAssistantMessageId 
+        ? state.currentAssistantMessageId
+        : undefined;
+      let targetMessage = targetMessageId 
+        ? state.messages.find(m => m.id === targetMessageId)
+        : null;
+      
+      // Only fall back to findLastMessageByRole if NOT a new turn AND NOT first update for turn
+      // This prevents appending to old assistant messages from previous turns
+      if (!targetMessage && !isNewTurn && !isFirstUpdateForTurn) {
+        targetMessage = findLastMessageByRole(state.messages, 'assistant');
+      }
+      
       // Handle thinking delta separately
       if (event.content.type === 'thinking_delta') {
-        let assistantMessage = findLastMessageByRole(state.messages, 'assistant');
-        
-        if (!assistantMessage) {
-          assistantMessage = {
+        if (!targetMessage) {
+          // Create new assistant message for thinking
+          const assistantMessage: InternalMessage = {
             id: generateId(),
             role: 'assistant',
             content: [],
@@ -365,16 +406,18 @@ export function processEvent(
           };
           return {
             ...state,
+            currentAssistantMessageId: assistantMessage.id,
+            currentTurnId: event.turnId,  // Update turn ID
             messages: [...state.messages, assistantMessage],
           };
         }
         
         const updatedMessage = {
-          ...assistantMessage,
-          thinking: (assistantMessage.thinking || '') + delta,
+          ...targetMessage,
+          thinking: (targetMessage.thinking || '') + delta,
           isStreaming: true,
         };
-        const messageIndex = state.messages.findIndex((m) => m.id === assistantMessage.id);
+        const messageIndex = state.messages.findIndex((m) => m.id === targetMessage.id);
         if (messageIndex >= 0) {
           const newMessages = [...state.messages];
           newMessages[messageIndex] = updatedMessage;
@@ -384,18 +427,19 @@ export function processEvent(
       }
       
       // Handle regular text delta
-      let assistantMessage = findLastMessageByRole(state.messages, 'assistant');
-
-      if (!assistantMessage) {
-        assistantMessage = createStreamingMessage('assistant', delta);
+      if (!targetMessage) {
+        // Create new assistant message for text
+        const assistantMessage = createStreamingMessage('assistant', delta);
         return {
           ...state,
+          currentAssistantMessageId: assistantMessage.id,
+          currentTurnId: event.turnId,  // Update turn ID
           messages: [...state.messages, assistantMessage],
         };
       }
 
-      const updatedMessage = appendTextToMessage(assistantMessage, delta);
-      const messageIndex = state.messages.findIndex((m) => m.id === assistantMessage.id);
+      const updatedMessage = appendTextToMessage(targetMessage, delta);
+      const messageIndex = state.messages.findIndex((m) => m.id === targetMessage.id);
       if (messageIndex >= 0) {
         const newMessages = [...state.messages];
         newMessages[messageIndex] = { ...updatedMessage, isStreaming: true };
@@ -457,7 +501,8 @@ export function processEvent(
         ...msg,
         isStreaming: false,
       }));
-      return { ...state, isProcessing: false, messages: newMessages };
+      // Clear the current assistant message ID and turn ID for the next turn
+      return { ...state, isProcessing: false, messages: newMessages, currentAssistantMessageId: undefined, currentTurnId: undefined };
     }
 
     case 'state_change': {
