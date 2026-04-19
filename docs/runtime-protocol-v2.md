@@ -120,8 +120,10 @@ Assistant message: [TextPart, ToolCallPart, ToolCallPart, TextPart]
 ### Tool Call/Result Pairing
 
 - Tool calls are parts of the **assistant message** that initiated them
-- Tool results are parts of a **separate tool result message** (role: "tool" or embedded in assistant)
+- Tool results are parts within messages, not separate messages with role "tool"
 - The `toolCallId` links calls to results
+- The canonical runtime v2 model uses only roles: `"user" | "assistant" | "system"`
+- Tool calls and tool results are represented as **parts**, not as separate "tool" messages
 
 ---
 

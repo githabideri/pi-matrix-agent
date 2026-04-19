@@ -108,15 +108,17 @@ export type TranscriptItem =
  * Note: turnId is NOT in the response. The SSE stream provides the authoritative
  * turnId via the turn_start event. This is by design - the POST endpoint is
  * non-blocking and returns immediately without waiting for inference.
+ *
+ * sessionId is optional to match the server-side AcceptedPromptResponse type.
  */
 export interface PromptResponse {
   accepted: boolean;
   roomKey: string;
   roomId: string;
-  sessionId: string;
+  sessionId?: string;  // Optional - matches server AcceptedPromptResponse.sessionId
   timestamp: string;
   // Note: turnId is intentionally NOT included
-  // The authoritative turnId comes from SSE via turn_start event
+  // The authoritative turnId comes from SSE via turn_start event, not POST /prompt
 }
 
 /**
