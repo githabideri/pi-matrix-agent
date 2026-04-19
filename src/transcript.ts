@@ -264,16 +264,33 @@ export async function buildLiveTranscript(
 /**
  * Live turn buffer types (imported from room-state for transcript reconstruction).
  * These are declared here to avoid circular imports.
+ *
+ * Note: The buffer now maintains an ordered `items` list for event-order preservation,
+ * plus legacy accumulation fields for backwards compatibility.
  */
 interface LiveTurnBufferForTranscript {
   isActive: boolean;
   turnId?: string;
   turnStartedAt?: string;
+  /** Ordered list of live transcript items in event sequence (authoritative for reconstruction) */
+  items: Array<{
+    kind: "user_message" | "assistant_message" | "tool_start" | "tool_end" | "thinking";
+    id: string;
+    timestamp: string;
+    text?: string;
+    toolName?: string;
+    toolCallId?: string;
+    arguments?: string;
+    success?: boolean;
+    result?: string;
+    error?: string;
+  }>;
+  /** Legacy convenience fields for backwards compatibility */
+  assistantText: string;
+  thinkingText: string;
   userPrompt?: string;
   userMessageTimestamp?: string;
-  assistantText: string;
   assistantMessageTimestamp?: string;
-  thinkingText: string;
   thinkingTimestamp?: string;
   toolStarts: Array<{
     id: string;
@@ -296,15 +313,75 @@ interface LiveTurnBufferForTranscript {
 /**
  * Convert a live turn buffer into transcript items.
  * This enables transcript reconstruction during processing (reload scenario).
+ *
+ * Emits items in the order events occurred (from the ordered `items` list),
+ * preserving accurate event sequence for reload reconstruction.
  */
 export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscript | undefined): TranscriptItem[] {
   if (!buffer?.isActive) {
     return [];
   }
 
+  // Use the ordered items list as the authoritative source
+  if (buffer.items && buffer.items.length > 0) {
+    return buffer.items.map((item) => {
+      switch (item.kind) {
+        case "user_message":
+          return {
+            kind: "user_message" as const,
+            id: item.id,
+            text: item.text || "",
+            timestamp: item.timestamp,
+          };
+        case "assistant_message":
+          return {
+            kind: "assistant_message" as const,
+            id: item.id,
+            text: item.text || "",
+            timestamp: item.timestamp,
+          };
+        case "thinking":
+          return {
+            kind: "thinking" as const,
+            id: item.id,
+            text: item.text || "",
+            timestamp: item.timestamp,
+          };
+        case "tool_start":
+          return {
+            kind: "tool_start" as const,
+            id: item.id,
+            toolName: item.toolName || "unknown",
+            toolCallId: item.toolCallId,
+            arguments: item.arguments,
+            timestamp: item.timestamp,
+          };
+        case "tool_end":
+          return {
+            kind: "tool_end" as const,
+            id: item.id,
+            toolName: item.toolName || "unknown",
+            toolCallId: item.toolCallId,
+            success: item.success ?? false,
+            result: item.result,
+            timestamp: item.timestamp,
+          };
+        default:
+          // Should not happen - all kinds are covered
+          return {
+            kind: "assistant_message" as const,
+            id: item.id,
+            text: item.text || "",
+            timestamp: item.timestamp,
+          };
+      }
+    });
+  }
+
+  // Fallback: reconstruct from legacy accumulation fields (for backwards compatibility)
+  // This preserves old behavior if items list is empty
   const items: TranscriptItem[] = [];
 
-  // Add user message item
   if (buffer.userPrompt) {
     items.push({
       kind: "user_message",
@@ -314,7 +391,6 @@ export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscr
     });
   }
 
-  // Add thinking item if present
   if (buffer.thinkingText) {
     items.push({
       kind: "thinking",
@@ -324,7 +400,6 @@ export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscr
     });
   }
 
-  // Add assistant message item if present
   if (buffer.assistantText) {
     items.push({
       kind: "assistant_message",
@@ -334,7 +409,6 @@ export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscr
     });
   }
 
-  // Add tool start/end pairs
   for (const toolStart of buffer.toolStarts) {
     items.push({
       kind: "tool_start",
@@ -364,6 +438,11 @@ export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscr
 /**
  * Merge persisted transcript items with live current-turn items.
  * Handles deduplication to avoid duplicate user prompt items.
+ *
+ * DEDUPE LOGIC:
+ * - Finds the last persisted user_message
+ * - If it matches the live user_message text (fuzzy), removes ONLY that specific item
+ * - Preserves all other persisted items including any that come after the duplicate
  */
 export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems: TranscriptItem[]): TranscriptItem[] {
   // If no live items, return persisted items
@@ -376,16 +455,28 @@ export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems
     return liveItems;
   }
 
-  // Check for duplicate user message at the end of persisted items
-  // This happens when the persisted transcript already contains the current user prompt
-  const persistedUserMessage = [...persistedItems]
-    .reverse()
-    .find((item: TranscriptItem) => item.kind === "user_message");
-  const liveUserMessage = liveItems.find((item: TranscriptItem) => item.kind === "user_message");
+  // Find the last persisted user_message (candidate for deduplication)
+  let persistedUserMessageIndex = -1;
+  for (let i = persistedItems.length - 1; i >= 0; i--) {
+    if (persistedItems[i].kind === "user_message") {
+      persistedUserMessageIndex = i;
+      break;
+    }
+  }
+
+  // Get the live user message
+  const liveUserMessage = liveItems.find(
+    (item): item is Extract<TranscriptItem, { kind: "user_message" }> => item.kind === "user_message",
+  );
 
   let mergedItems: TranscriptItem[];
 
-  if (persistedUserMessage && liveUserMessage) {
+  if (persistedUserMessageIndex >= 0 && liveUserMessage) {
+    const persistedUserMessage = persistedItems[persistedUserMessageIndex] as Extract<
+      TranscriptItem,
+      { kind: "user_message" }
+    >;
+
     // Check if they have the same text (potential duplicate)
     // Use a fuzzy comparison for robustness
     const persistedText = persistedUserMessage.text.trim();
@@ -396,8 +487,12 @@ export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems
       persistedText === liveText || persistedText.startsWith(liveText) || liveText.startsWith(persistedText);
 
     if (isDuplicate) {
-      // Remove the duplicate user message from persisted items
-      mergedItems = persistedItems.slice(0, -1);
+      // Remove ONLY the specific duplicated user_message at the found index
+      // NOT the last element - the duplicate could be followed by other items
+      mergedItems = [
+        ...persistedItems.slice(0, persistedUserMessageIndex),
+        ...persistedItems.slice(persistedUserMessageIndex + 1),
+      ];
     } else {
       mergedItems = [...persistedItems];
     }

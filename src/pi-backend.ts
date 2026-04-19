@@ -160,8 +160,13 @@ export class PiSessionBackend {
   /**
    * Handle session events to populate the live turn buffer.
    * This enables transcript reconstruction during processing (reload scenario).
+   *
+   * Preserves original event timestamps when available for accurate replay.
    */
   private handleLiveTurnEvent(roomId: string, event: any): void {
+    // Extract timestamp from event - SDK events typically have `timestamp` or `time` field
+    const eventTimestamp = event.timestamp || event.time || undefined;
+
     switch (event.type) {
       case "turn_start": {
         // Reset buffer and capture turn start info
@@ -179,7 +184,8 @@ export class PiSessionBackend {
           }
         }
         const turnId = event.turnId || `turn-${Date.now()}`;
-        this.roomStateManager.updateLiveTurnStart(roomId, turnId, promptPreview);
+        // Pass event timestamp for turn start and user message
+        this.roomStateManager.updateLiveTurnStart(roomId, turnId, promptPreview, eventTimestamp);
         break;
       }
 
@@ -187,10 +193,12 @@ export class PiSessionBackend {
         // Handle assistant message updates (text and thinking)
         const assistantMessageEvent = event.assistantMessageEvent;
         if (assistantMessageEvent) {
+          // Extract timestamp from the nested event if available
+          const nestedTimestamp = assistantMessageEvent.timestamp || assistantMessageEvent.time || eventTimestamp;
           if (assistantMessageEvent.type === "text_delta") {
-            this.roomStateManager.appendAssistantText(roomId, assistantMessageEvent.delta);
+            this.roomStateManager.appendAssistantText(roomId, assistantMessageEvent.delta, nestedTimestamp);
           } else if (assistantMessageEvent.type === "thinking_delta") {
-            this.roomStateManager.appendThinkingText(roomId, assistantMessageEvent.delta);
+            this.roomStateManager.appendThinkingText(roomId, assistantMessageEvent.delta, nestedTimestamp);
           }
         }
         break;
@@ -202,7 +210,9 @@ export class PiSessionBackend {
         if (toolExecutionEvent) {
           const toolCallId = toolExecutionEvent.toolCallId || `tool-${Date.now()}`;
           const toolArgs = JSON.stringify(toolExecutionEvent.arguments);
-          this.roomStateManager.addToolStart(roomId, toolCallId, toolExecutionEvent.name, toolArgs);
+          // Extract timestamp from nested event
+          const nestedTimestamp = toolExecutionEvent.timestamp || toolExecutionEvent.time || eventTimestamp;
+          this.roomStateManager.addToolStart(roomId, toolCallId, toolExecutionEvent.name, toolArgs, nestedTimestamp);
         }
         break;
       }
@@ -212,6 +222,8 @@ export class PiSessionBackend {
         const toolResultEvent = event.toolResultEvent;
         if (toolResultEvent) {
           const toolCallId = toolResultEvent.toolCallId || `tool-${Date.now()}`;
+          // Extract timestamp from nested event
+          const nestedTimestamp = toolResultEvent.timestamp || toolResultEvent.time || eventTimestamp;
           this.roomStateManager.addToolEnd(
             roomId,
             toolCallId,
@@ -219,6 +231,7 @@ export class PiSessionBackend {
             !toolResultEvent.isError,
             String(toolResultEvent.result || ""),
             toolResultEvent.isError ? String(toolResultEvent.error) : undefined,
+            nestedTimestamp,
           );
         }
         break;

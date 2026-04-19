@@ -16,6 +16,14 @@ export interface RoomSnapshot {
  * This is backend-owned state that tracks the live turn for transcript reconstruction.
  * Used to support reload during processing - the transcript endpoint can reconstruct
  * the current in-flight turn from this buffer.
+ *
+ * DESIGN: Maintains both accumulation fields (for convenience) AND an ordered list
+ * of transcript-like items (for correct event ordering on reload).
+ *
+ * The ordered `items` list preserves the sequence events occurred, enabling
+ * accurate transcript reconstruction. Accumulation fields (`assistantText`, etc.)
+ * are kept for backwards compatibility and convenience but are derived from
+ * or synchronized with the ordered items.
  */
 export interface LiveTurnBuffer {
   /** Whether a turn is currently active */
@@ -24,22 +32,48 @@ export interface LiveTurnBuffer {
   turnId?: string;
   /** Turn start timestamp */
   turnStartedAt?: string;
-  /** User prompt text for current turn */
+  /**
+   * Ordered list of live transcript items in event sequence.
+   * This is the authoritative source for transcript reconstruction.
+   * Each item can be updated in-place (e.g., assistant text deltas append to existing item).
+   */
+  items: LiveTranscriptItem[];
+  /**
+   * Convenience field: accumulated assistant text for current turn.
+   * Derived from items but kept for backwards compatibility.
+   */
+  assistantText: string;
+  /** Convenience field: accumulated thinking text for current turn. */
+  thinkingText: string;
+  /** User prompt text for current turn (populated at turn start) */
   userPrompt?: string;
   /** User message timestamp */
   userMessageTimestamp?: string;
-  /** Accumulated assistant text for current turn */
-  assistantText: string;
-  /** Assistant message timestamp */
+  /** Assistant message timestamp (legacy, for backwards compatibility) */
   assistantMessageTimestamp?: string;
-  /** Accumulated thinking/reasoning text for current turn */
-  thinkingText: string;
-  /** Thinking message timestamp */
+  /** Thinking message timestamp (legacy, for backwards compatibility) */
   thinkingTimestamp?: string;
-  /** Live tool start items */
+  /** Live tool start items (legacy bucket, for backwards compatibility) */
   toolStarts: LiveToolStartItem[];
-  /** Live tool end items */
+  /** Live tool end items (legacy bucket, for backwards compatibility) */
   toolEnds: LiveToolEndItem[];
+}
+
+/**
+ * A live transcript item in the ordered list.
+ * Similar to TranscriptItem but with some differences for live accumulation.
+ */
+export interface LiveTranscriptItem {
+  kind: "user_message" | "assistant_message" | "tool_start" | "tool_end" | "thinking";
+  id: string;
+  timestamp: string;
+  text?: string; // For user_message, assistant_message, thinking
+  toolName?: string; // For tool_start, tool_end
+  toolCallId?: string; // For tool_start, tool_end
+  arguments?: string; // For tool_start
+  success?: boolean; // For tool_end
+  result?: string; // For tool_end
+  error?: string; // For tool_end
 }
 
 /**
@@ -74,11 +108,12 @@ export function createEmptyLiveTurnBuffer(): LiveTurnBuffer {
     isActive: false,
     turnId: undefined,
     turnStartedAt: undefined,
+    items: [],
+    assistantText: "",
+    thinkingText: "",
     userPrompt: undefined,
     userMessageTimestamp: undefined,
-    assistantText: "",
     assistantMessageTimestamp: undefined,
-    thinkingText: "",
     thinkingTimestamp: undefined,
     toolStarts: [],
     toolEnds: [],
@@ -343,55 +378,120 @@ export class RoomStateManager {
 
   /**
    * Update the live turn buffer with turn start info.
+   * @param eventTimestamp The original event timestamp, if available
    */
-  updateLiveTurnStart(roomId: string, turnId: string, userPrompt?: string): void {
+  updateLiveTurnStart(roomId: string, turnId: string, userPrompt?: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
       state.liveTurnBuffer.isActive = true;
       state.liveTurnBuffer.turnId = turnId;
-      state.liveTurnBuffer.turnStartedAt = new Date().toISOString();
+      state.liveTurnBuffer.turnStartedAt = eventTimestamp || new Date().toISOString();
       if (userPrompt) {
         state.liveTurnBuffer.userPrompt = userPrompt;
-        state.liveTurnBuffer.userMessageTimestamp = new Date().toISOString();
+        const ts = eventTimestamp || new Date().toISOString();
+        state.liveTurnBuffer.userMessageTimestamp = ts;
+        // Add user_message item to ordered list
+        state.liveTurnBuffer.items.push({
+          kind: "user_message",
+          id: `live-user-${turnId}`,
+          timestamp: ts,
+          text: userPrompt,
+        });
       }
     }
   }
 
   /**
    * Append assistant text to the live turn buffer.
+   * Updates the existing assistant item in-place or creates a new one.
+   * @param eventTimestamp The original event timestamp, if available
    */
-  appendAssistantText(roomId: string, delta: string): void {
+  appendAssistantText(roomId: string, delta: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
-      if (!state.liveTurnBuffer.assistantMessageTimestamp) {
-        state.liveTurnBuffer.assistantMessageTimestamp = new Date().toISOString();
+      // Find existing assistant item in the ordered list
+      const existingItem = state.liveTurnBuffer.items.find((item) => item.kind === "assistant_message");
+
+      if (existingItem) {
+        // Update existing item in-place
+        existingItem.text = (existingItem.text || "") + delta;
+      } else {
+        // Create new assistant item
+        const ts = eventTimestamp || new Date().toISOString();
+        state.liveTurnBuffer.items.push({
+          kind: "assistant_message",
+          id: `live-assistant-${state.liveTurnBuffer.turnId || Date.now()}`,
+          timestamp: ts,
+          text: delta,
+        });
+        // Set legacy timestamp on first delta
+        if (!state.liveTurnBuffer.assistantMessageTimestamp) {
+          state.liveTurnBuffer.assistantMessageTimestamp = ts;
+        }
       }
+      // Update convenience field
       state.liveTurnBuffer.assistantText += delta;
     }
   }
 
   /**
    * Append thinking text to the live turn buffer.
+   * Updates the existing thinking item in-place or creates a new one.
+   * @param eventTimestamp The original event timestamp, if available
    */
-  appendThinkingText(roomId: string, delta: string): void {
+  appendThinkingText(roomId: string, delta: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
-      if (!state.liveTurnBuffer.thinkingTimestamp) {
-        state.liveTurnBuffer.thinkingTimestamp = new Date().toISOString();
+      // Find existing thinking item in the ordered list
+      const existingItem = state.liveTurnBuffer.items.find((item) => item.kind === "thinking");
+
+      if (existingItem) {
+        // Update existing item in-place
+        existingItem.text = (existingItem.text || "") + delta;
+      } else {
+        // Create new thinking item
+        const ts = eventTimestamp || new Date().toISOString();
+        state.liveTurnBuffer.items.push({
+          kind: "thinking",
+          id: `live-thinking-${state.liveTurnBuffer.turnId || Date.now()}`,
+          timestamp: ts,
+          text: delta,
+        });
+        // Set legacy timestamp on first delta
+        if (!state.liveTurnBuffer.thinkingTimestamp) {
+          state.liveTurnBuffer.thinkingTimestamp = ts;
+        }
       }
+      // Update convenience field
       state.liveTurnBuffer.thinkingText += delta;
     }
   }
 
   /**
    * Add a tool start item to the live turn buffer.
+   * Adds to both the ordered items list and the legacy toolStarts bucket.
+   * @param eventTimestamp The original event timestamp, if available
    */
-  addToolStart(roomId: string, toolCallId: string, toolName: string, toolArgs?: string): void {
+  addToolStart(roomId: string, toolCallId: string, toolName: string, toolArgs?: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
+      const ts = eventTimestamp || new Date().toISOString();
+      const id = `tool-start-${toolCallId}`;
+
+      // Add to ordered items list
+      state.liveTurnBuffer.items.push({
+        kind: "tool_start",
+        id,
+        timestamp: ts,
+        toolName,
+        toolCallId,
+        arguments: toolArgs,
+      });
+
+      // Also add to legacy bucket for backwards compatibility
       state.liveTurnBuffer.toolStarts.push({
-        id: `tool-start-${toolCallId}`,
-        timestamp: new Date().toISOString(),
+        id,
+        timestamp: ts,
         toolName,
         toolCallId,
         arguments: toolArgs,
@@ -401,6 +501,8 @@ export class RoomStateManager {
 
   /**
    * Add a tool end item to the live turn buffer.
+   * Adds to both the ordered items list and the legacy toolEnds bucket.
+   * @param eventTimestamp The original event timestamp, if available
    */
   addToolEnd(
     roomId: string,
@@ -409,12 +511,29 @@ export class RoomStateManager {
     success: boolean,
     result?: string,
     error?: string,
+    eventTimestamp?: string,
   ): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
+      const ts = eventTimestamp || new Date().toISOString();
+      const id = `tool-end-${toolCallId}`;
+
+      // Add to ordered items list
+      state.liveTurnBuffer.items.push({
+        kind: "tool_end",
+        id,
+        timestamp: ts,
+        toolName,
+        toolCallId,
+        success,
+        result,
+        error,
+      });
+
+      // Also add to legacy bucket for backwards compatibility
       state.liveTurnBuffer.toolEnds.push({
-        id: `tool-end-${toolCallId}`,
-        timestamp: new Date().toISOString(),
+        id,
+        timestamp: ts,
         toolName,
         toolCallId,
         success,

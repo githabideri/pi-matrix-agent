@@ -5,8 +5,10 @@ import { liveTurnBufferToTranscriptItems, mergeTranscriptItems, type TranscriptI
 /**
  * Tests for live current-turn transcript buffer functionality.
  *
- * This tests the core Milestone 2 feature: backend-owned live turn tracking
- * that enables transcript reconstruction during processing (reload scenario).
+ * Milestone 2.1 correctness pass:
+ * - Event ordering preservation
+ * - Deduplication correctness
+ * - Timestamp fidelity
  */
 
 describe("Live turn buffer creation", () => {
@@ -16,143 +18,73 @@ describe("Live turn buffer creation", () => {
     expect(buffer.isActive).toBe(false);
     expect(buffer.turnId).toBeUndefined();
     expect(buffer.turnStartedAt).toBeUndefined();
-    expect(buffer.userPrompt).toBeUndefined();
-    expect(buffer.userMessageTimestamp).toBeUndefined();
+    expect(buffer.items).toEqual([]);
     expect(buffer.assistantText).toBe("");
-    expect(buffer.assistantMessageTimestamp).toBeUndefined();
     expect(buffer.thinkingText).toBe("");
-    expect(buffer.thinkingTimestamp).toBeUndefined();
+    expect(buffer.userPrompt).toBeUndefined();
     expect(buffer.toolStarts).toEqual([]);
     expect(buffer.toolEnds).toEqual([]);
   });
 });
 
-describe("liveTurnBufferToTranscriptItems", () => {
-  it("returns empty array for undefined buffer", () => {
-    const items = liveTurnBufferToTranscriptItems(undefined);
-    expect(items).toEqual([]);
-  });
-
-  it("returns empty array for inactive buffer", () => {
-    const buffer = createEmptyLiveTurnBuffer();
-    buffer.isActive = false;
-    buffer.assistantText = "some text";
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-    expect(items).toEqual([]);
-  });
-
-  it("converts user prompt to user_message item", () => {
+describe("liveTurnBufferToTranscriptItems - Event Ordering", () => {
+  it("preserves event order: user -> assistant -> tool_start -> tool_end -> assistant continuation", () => {
+    // Simulate a turn where assistant text, then tool, then more assistant text
     const buffer: LiveTurnBuffer = {
       ...createEmptyLiveTurnBuffer(),
       isActive: true,
       turnId: "turn-123",
       turnStartedAt: "2024-01-01T00:00:00.000Z",
-      userPrompt: "Hello, world!",
-      userMessageTimestamp: "2024-01-01T00:00:01.000Z",
-    };
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-
-    expect(items).toHaveLength(1);
-    expect(items[0]).toEqual({
-      kind: "user_message",
-      id: "live-user-turn-123",
-      text: "Hello, world!",
-      timestamp: "2024-01-01T00:00:01.000Z",
-    });
-  });
-
-  it("converts assistant text to assistant_message item", () => {
-    const buffer: LiveTurnBuffer = {
-      ...createEmptyLiveTurnBuffer(),
-      isActive: true,
-      turnId: "turn-123",
-      turnStartedAt: "2024-01-01T00:00:00.000Z",
-      assistantText: "Hi there!",
-      assistantMessageTimestamp: "2024-01-01T00:00:02.000Z",
-    };
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-
-    expect(items).toHaveLength(1);
-    expect(items[0]).toEqual({
-      kind: "assistant_message",
-      id: "live-assistant-turn-123",
-      text: "Hi there!",
-      timestamp: "2024-01-01T00:00:02.000Z",
-    });
-  });
-
-  it("converts thinking text to thinking item", () => {
-    const buffer: LiveTurnBuffer = {
-      ...createEmptyLiveTurnBuffer(),
-      isActive: true,
-      turnId: "turn-123",
-      turnStartedAt: "2024-01-01T00:00:00.000Z",
-      thinkingText: "Let me think about this...",
-      thinkingTimestamp: "2024-01-01T00:00:01.500Z",
-    };
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-
-    expect(items).toHaveLength(1);
-    expect(items[0]).toEqual({
-      kind: "thinking",
-      id: "live-thinking-turn-123",
-      text: "Let me think about this...",
-      timestamp: "2024-01-01T00:00:01.500Z",
-    });
-  });
-
-  it("converts tool starts and ends to tool_start/tool_end items", () => {
-    const buffer: LiveTurnBuffer = {
-      ...createEmptyLiveTurnBuffer(),
-      isActive: true,
-      turnId: "turn-123",
-      turnStartedAt: "2024-01-01T00:00:00.000Z",
-      toolStarts: [
+      userPrompt: "What files are here?",
+      userMessageTimestamp: "2024-01-01T00:00:00.100Z",
+      assistantText: "Let me check\n\nHere are the files:",
+      thinkingText: "I need to list files",
+      assistantMessageTimestamp: "2024-01-01T00:00:01.000Z",
+      thinkingTimestamp: "2024-01-01T00:00:00.500Z",
+      // Ordered items list (authoritative for event order)
+      items: [
         {
+          kind: "user_message",
+          id: "live-user-turn-123",
+          timestamp: "2024-01-01T00:00:00.100Z",
+          text: "What files are here?",
+        },
+        {
+          kind: "thinking",
+          id: "live-thinking-turn-123",
+          timestamp: "2024-01-01T00:00:00.500Z",
+          text: "I need to list files",
+        },
+        {
+          kind: "assistant_message",
+          id: "live-assistant-turn-123",
+          timestamp: "2024-01-01T00:00:01.000Z",
+          text: "Let me check",
+        },
+        {
+          kind: "tool_start",
           id: "tool-start-tc1",
-          timestamp: "2024-01-01T00:00:03.000Z",
+          timestamp: "2024-01-01T00:00:02.000Z",
           toolName: "bash",
           toolCallId: "tc1",
           arguments: '{"command": "ls -la"}',
         },
-      ],
-      toolEnds: [
         {
+          kind: "tool_end",
           id: "tool-end-tc1",
-          timestamp: "2024-01-01T00:00:04.000Z",
+          timestamp: "2024-01-01T00:00:03.000Z",
           toolName: "bash",
           toolCallId: "tc1",
           success: true,
-          result: "total 100\n-rw-r--r-- 1 root root 1024 Jan 1 00:00 file.txt",
+          result: "total 100",
+        },
+        {
+          kind: "assistant_message",
+          id: "live-assistant-turn-123-cont",
+          timestamp: "2024-01-01T00:00:04.000Z",
+          text: "\n\nHere are the files:",
         },
       ],
-    };
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-
-    expect(items).toHaveLength(2);
-    expect(items[0].kind).toBe("tool_start");
-    expect(items[0].toolName).toBe("bash");
-    expect(items[1].kind).toBe("tool_end");
-    expect(items[1].success).toBe(true);
-  });
-
-  it("converts complete turn with all content types", () => {
-    const buffer: LiveTurnBuffer = {
-      ...createEmptyLiveTurnBuffer(),
-      isActive: true,
-      turnId: "turn-456",
-      turnStartedAt: "2024-01-01T00:00:00.000Z",
-      userPrompt: "What files are in the current directory?",
-      userMessageTimestamp: "2024-01-01T00:00:00.100Z",
-      thinkingText: "I need to use the bash tool to list files.",
-      thinkingTimestamp: "2024-01-01T00:00:00.500Z",
-      assistantText: "Let me check the current directory for you.",
-      assistantMessageTimestamp: "2024-01-01T00:00:01.000Z",
       toolStarts: [
         {
           id: "tool-start-tc1",
@@ -176,60 +108,199 @@ describe("liveTurnBufferToTranscriptItems", () => {
 
     const items = liveTurnBufferToTranscriptItems(buffer);
 
-    // Should have: user_message, thinking, assistant_message, tool_start, tool_end
-    expect(items).toHaveLength(5);
+    // Should preserve exact event order from items list
+    expect(items).toHaveLength(6);
     expect(items[0].kind).toBe("user_message");
     expect(items[1].kind).toBe("thinking");
     expect(items[2].kind).toBe("assistant_message");
+    expect(items[2].text).toBe("Let me check");
     expect(items[3].kind).toBe("tool_start");
     expect(items[4].kind).toBe("tool_end");
+    expect(items[5].kind).toBe("assistant_message");
+    expect(items[5].text).toBe("\n\nHere are the files:");
   });
 
-  it("handles partial turn with only user prompt", () => {
-    // Simulates immediate reload after submitting prompt but before any response
+  it("preserves order: assistant -> tool_start -> tool_end without thinking", () => {
     const buffer: LiveTurnBuffer = {
       ...createEmptyLiveTurnBuffer(),
       isActive: true,
-      turnId: "turn-789",
+      turnId: "turn-456",
       turnStartedAt: "2024-01-01T00:00:00.000Z",
-      userPrompt: "Just submitted this prompt",
+      userPrompt: "Run ls",
       userMessageTimestamp: "2024-01-01T00:00:00.100Z",
-    };
-
-    const items = liveTurnBufferToTranscriptItems(buffer);
-
-    expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe("user_message");
-    expect(items[0].text).toBe("Just submitted this prompt");
-  });
-
-  it("handles partial turn with user prompt and partial assistant text", () => {
-    // Simulates reload mid-response
-    const buffer: LiveTurnBuffer = {
-      ...createEmptyLiveTurnBuffer(),
-      isActive: true,
-      turnId: "turn-abc",
-      turnStartedAt: "2024-01-01T00:00:00.000Z",
-      userPrompt: "Tell me a story",
-      userMessageTimestamp: "2024-01-01T00:00:00.100Z",
-      assistantText: "Once upon a time, in a land far away...",
+      assistantText: "Running ls",
       assistantMessageTimestamp: "2024-01-01T00:00:01.000Z",
+      items: [
+        {
+          kind: "user_message",
+          id: "live-user-turn-456",
+          timestamp: "2024-01-01T00:00:00.100Z",
+          text: "Run ls",
+        },
+        {
+          kind: "assistant_message",
+          id: "live-assistant-turn-456",
+          timestamp: "2024-01-01T00:00:01.000Z",
+          text: "Running ls",
+        },
+        {
+          kind: "tool_start",
+          id: "tool-start-tc1",
+          timestamp: "2024-01-01T00:00:02.000Z",
+          toolName: "bash",
+          toolCallId: "tc1",
+        },
+        {
+          kind: "tool_end",
+          id: "tool-end-tc1",
+          timestamp: "2024-01-01T00:00:03.000Z",
+          toolName: "bash",
+          toolCallId: "tc1",
+          success: true,
+        },
+      ],
+      toolStarts: [],
+      toolEnds: [],
     };
 
     const items = liveTurnBufferToTranscriptItems(buffer);
 
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(4);
     expect(items[0].kind).toBe("user_message");
     expect(items[1].kind).toBe("assistant_message");
-    expect(items[1].text).toBe("Once upon a time, in a land far away...");
+    expect(items[2].kind).toBe("tool_start");
+    expect(items[3].kind).toBe("tool_end");
+  });
+
+  it("returns empty array for undefined buffer", () => {
+    const items = liveTurnBufferToTranscriptItems(undefined);
+    expect(items).toEqual([]);
+  });
+
+  it("returns empty array for inactive buffer", () => {
+    const buffer = createEmptyLiveTurnBuffer();
+    buffer.isActive = false;
+    buffer.items = [{ kind: "user_message", id: "1", timestamp: "2024-01-01T00:00:00.000Z", text: "test" }];
+
+    const items = liveTurnBufferToTranscriptItems(buffer);
+    expect(items).toEqual([]);
+  });
+
+  it("uses original event timestamps when present", () => {
+    const buffer: LiveTurnBuffer = {
+      ...createEmptyLiveTurnBuffer(),
+      isActive: true,
+      turnId: "turn-ts",
+      turnStartedAt: "2024-01-01T00:00:00.000Z",
+      userPrompt: "Test",
+      userMessageTimestamp: "2024-01-01T00:00:00.100Z",
+      items: [
+        {
+          kind: "user_message",
+          id: "live-user-turn-ts",
+          timestamp: "2024-01-01T00:00:00.100Z",
+          text: "Test",
+        },
+        {
+          kind: "assistant_message",
+          id: "live-assistant-turn-ts",
+          timestamp: "2024-01-01T00:00:01.500Z",
+          text: "Response",
+        },
+      ],
+      assistantText: "Response",
+      thinkingText: "",
+      toolStarts: [],
+      toolEnds: [],
+    };
+
+    const items = liveTurnBufferToTranscriptItems(buffer);
+
+    expect(items[0].timestamp).toBe("2024-01-01T00:00:00.100Z");
+    expect(items[1].timestamp).toBe("2024-01-01T00:00:01.500Z");
   });
 });
 
-describe("mergeTranscriptItems", () => {
-  it("returns persisted items when no live items", () => {
+describe("mergeTranscriptItems - Deduplication Correctness", () => {
+  it("removes only the actual duplicated user message, not the last element", () => {
+    // Scenario: Last persisted item is assistant_message, but user_message before it is duplicate
     const persisted: TranscriptItem[] = [
       { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
       { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
+      { kind: "user_message", id: "p3", text: "Current prompt", timestamp: "2024-01-01T00:00:02.000Z" },
+      { kind: "assistant_message", id: "p4", text: "Partial response", timestamp: "2024-01-01T00:00:03.000Z" },
+    ];
+    const live: TranscriptItem[] = [
+      { kind: "user_message", id: "l1", text: "Current prompt", timestamp: "2024-01-01T00:00:02.100Z" },
+      { kind: "assistant_message", id: "l2", text: "More response", timestamp: "2024-01-01T00:00:04.000Z" },
+    ];
+
+    const result = mergeTranscriptItems(persisted, live);
+
+    // Should remove p3 (the duplicate user_message), but keep p4 (assistant after it)
+    expect(result).toHaveLength(5); // p1, p2, p4, l1, l2
+    expect(result.map((i) => i.id)).toEqual(["p1", "p2", "p4", "l1", "l2"]);
+    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(2); // p1, l1
+  });
+
+  it("handles duplicate where last persisted item is tool_end", () => {
+    // Scenario: Last persisted item is tool_end, user_message is earlier
+    const persisted: TranscriptItem[] = [
+      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
+      { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
+      { kind: "user_message", id: "p3", text: "Run ls", timestamp: "2024-01-01T00:00:02.000Z" },
+      { kind: "tool_start", id: "p4", toolName: "bash", timestamp: "2024-01-01T00:00:03.000Z" },
+      { kind: "tool_end", id: "p5", toolName: "bash", success: true, timestamp: "2024-01-01T00:00:04.000Z" },
+    ];
+    const live: TranscriptItem[] = [
+      { kind: "user_message", id: "l1", text: "Run ls", timestamp: "2024-01-01T00:00:02.100Z" },
+      { kind: "assistant_message", id: "l2", text: "Here are files", timestamp: "2024-01-01T00:00:05.000Z" },
+    ];
+
+    const result = mergeTranscriptItems(persisted, live);
+
+    // Should remove p3 (duplicate user_message), keep p4, p5 (tool items after it)
+    expect(result).toHaveLength(6); // p1, p2, p4, p5, l1, l2
+    expect(result.map((i) => i.id)).toEqual(["p1", "p2", "p4", "p5", "l1", "l2"]);
+    // Verify tool items are preserved
+    expect(result.some((i) => i.id === "p4" && i.kind === "tool_start")).toBe(true);
+    expect(result.some((i) => i.id === "p5" && i.kind === "tool_end")).toBe(true);
+  });
+
+  it("does not deduplicate when prompts are different", () => {
+    const persisted: TranscriptItem[] = [
+      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
+      { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
+    ];
+    const live: TranscriptItem[] = [
+      { kind: "user_message", id: "l1", text: "Different prompt", timestamp: "2024-01-01T00:00:02.000Z" },
+    ];
+
+    const result = mergeTranscriptItems(persisted, live);
+
+    expect(result).toHaveLength(3);
+    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(2); // Both preserved
+  });
+
+  it("handles deduplication with fuzzy matching (substring)", () => {
+    const persisted: TranscriptItem[] = [
+      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
+      { kind: "user_message", id: "p2", text: "Current", timestamp: "2024-01-01T00:00:02.000Z" },
+    ];
+    const live: TranscriptItem[] = [
+      { kind: "user_message", id: "l1", text: "Current prompt text", timestamp: "2024-01-01T00:00:02.100Z" },
+    ];
+
+    const result = mergeTranscriptItems(persisted, live);
+
+    // Should deduplicate since "Current" is substring of "Current prompt text"
+    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(2); // p1, l1
+    expect(result.map((i) => i.id)).toEqual(["p1", "l1"]);
+  });
+
+  it("returns persisted items when no live items", () => {
+    const persisted: TranscriptItem[] = [
+      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
     ];
 
     const result = mergeTranscriptItems(persisted, []);
@@ -246,73 +317,37 @@ describe("mergeTranscriptItems", () => {
 
     expect(result).toEqual(live);
   });
+});
 
-  it("appends live items to persisted items", () => {
+describe("mergeTranscriptItems - Event Order Preservation", () => {
+  it("preserves historical order AND live event order", () => {
+    // Prior conversation
     const persisted: TranscriptItem[] = [
-      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
-      { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
+      { kind: "user_message", id: "p1", text: "What's the weather?", timestamp: "2024-01-01T00:00:00.000Z" },
+      { kind: "assistant_message", id: "p2", text: "It's sunny!", timestamp: "2024-01-01T00:00:01.000Z" },
     ];
+
+    // Current live turn with interleaved events
     const live: TranscriptItem[] = [
-      { kind: "user_message", id: "l1", text: "How are you?", timestamp: "2024-01-01T00:00:02.000Z" },
+      { kind: "user_message", id: "l1", text: "List files", timestamp: "2024-01-01T00:00:10.000Z" },
+      { kind: "assistant_message", id: "l2", text: "Sure", timestamp: "2024-01-01T00:00:11.000Z" },
+      { kind: "tool_start", id: "l3", toolName: "bash", timestamp: "2024-01-01T00:00:12.000Z" },
+      { kind: "tool_end", id: "l4", toolName: "bash", success: true, timestamp: "2024-01-01T00:00:13.000Z" },
+      { kind: "assistant_message", id: "l5", text: "Here they are", timestamp: "2024-01-01T00:00:14.000Z" },
     ];
 
-    const result = mergeTranscriptItems(persisted, live);
+    const merged = mergeTranscriptItems(persisted, live);
 
-    expect(result).toHaveLength(3);
-    expect(result[0].id).toBe("p1");
-    expect(result[1].id).toBe("p2");
-    expect(result[2].id).toBe("l1");
-  });
+    // Verify historical order preserved
+    expect(merged[0].id).toBe("p1");
+    expect(merged[1].id).toBe("p2");
 
-  it("deduplicates user message when persisted ends with same prompt", () => {
-    const persisted: TranscriptItem[] = [
-      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
-      { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
-      { kind: "user_message", id: "p3", text: "Current prompt", timestamp: "2024-01-01T00:00:02.000Z" },
-    ];
-    const live: TranscriptItem[] = [
-      { kind: "user_message", id: "l1", text: "Current prompt", timestamp: "2024-01-01T00:00:02.100Z" },
-      { kind: "assistant_message", id: "l2", text: "Partial response", timestamp: "2024-01-01T00:00:03.000Z" },
-    ];
-
-    const result = mergeTranscriptItems(persisted, live);
-
-    // Should NOT have duplicate user_message for "Current prompt"
-    expect(result).toHaveLength(4); // p1, p2, l1, l2 (p3 was removed)
-    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(2); // Only 2 user messages
-  });
-
-  it("does not deduplicate when prompts are different", () => {
-    const persisted: TranscriptItem[] = [
-      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
-      { kind: "assistant_message", id: "p2", text: "Hi!", timestamp: "2024-01-01T00:00:01.000Z" },
-      { kind: "user_message", id: "p3", text: "Old prompt", timestamp: "2024-01-01T00:00:02.000Z" },
-    ];
-    const live: TranscriptItem[] = [
-      { kind: "user_message", id: "l1", text: "New prompt", timestamp: "2024-01-01T00:00:03.000Z" },
-    ];
-
-    const result = mergeTranscriptItems(persisted, live);
-
-    // Should keep both user messages since they're different
-    expect(result).toHaveLength(4);
-    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(3); // 3 user messages
-  });
-
-  it("handles deduplication with fuzzy matching (substring)", () => {
-    // Simulates case where persisted has truncated preview but live has full prompt
-    const persisted: TranscriptItem[] = [
-      { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
-      { kind: "user_message", id: "p2", text: "Current", timestamp: "2024-01-01T00:00:02.000Z" },
-    ];
-    const live: TranscriptItem[] = [
-      { kind: "user_message", id: "l1", text: "Current prompt text", timestamp: "2024-01-01T00:00:02.100Z" },
-    ];
-
-    const result = mergeTranscriptItems(persisted, live);
-
-    // Should deduplicate since "Current" is substring of "Current prompt text"
-    expect(result.filter((i) => i.kind === "user_message")).toHaveLength(2); // Only 2 user messages
+    // Verify live event order preserved (including interleaving)
+    expect(merged[2].id).toBe("l1"); // user
+    expect(merged[3].id).toBe("l2"); // assistant
+    expect(merged[4].id).toBe("l3"); // tool_start
+    expect(merged[5].id).toBe("l4"); // tool_end
+    expect(merged[6].id).toBe("l5"); // assistant continuation
   });
 
   it("preserves tool items from live buffer", () => {
@@ -327,21 +362,19 @@ describe("mergeTranscriptItems", () => {
 
     const result = mergeTranscriptItems(persisted, live);
 
-    expect(result).toHaveLength(4); // p1, l1, t1, t2 (no dedup since prompts differ)
+    expect(result).toHaveLength(4);
     expect(result.filter((i) => i.kind === "tool_start")).toHaveLength(1);
     expect(result.filter((i) => i.kind === "tool_end")).toHaveLength(1);
   });
 });
 
-describe("Reload during processing scenario", () => {
+describe("Reload during processing scenarios", () => {
   it("simulates reload with prior conversation + current in-flight turn", () => {
-    // Simulate persisted transcript with prior conversation
     const persisted: TranscriptItem[] = [
       { kind: "user_message", id: "p1", text: "What's the weather?", timestamp: "2024-01-01T00:00:00.000Z" },
       { kind: "assistant_message", id: "p2", text: "It's sunny!", timestamp: "2024-01-01T00:00:01.000Z" },
     ];
 
-    // Simulate live buffer with current in-flight turn
     const live: TranscriptItem[] = [
       { kind: "user_message", id: "l1", text: "What files are here?", timestamp: "2024-01-01T00:00:10.000Z" },
       { kind: "thinking", id: "l2", text: "I need to use bash to list files.", timestamp: "2024-01-01T00:00:10.500Z" },
@@ -366,7 +399,6 @@ describe("Reload during processing scenario", () => {
   });
 
   it("handles reload immediately after prompt submission (only user message in live)", () => {
-    // User just submitted a prompt and reloaded before any response
     const persisted: TranscriptItem[] = [
       { kind: "user_message", id: "p1", text: "Previous question", timestamp: "2024-01-01T00:00:00.000Z" },
       { kind: "assistant_message", id: "p2", text: "Previous answer", timestamp: "2024-01-01T00:00:01.000Z" },
@@ -383,7 +415,6 @@ describe("Reload during processing scenario", () => {
   });
 
   it("handles reload mid-tool execution", () => {
-    // User reloaded while a tool is executing
     const persisted: TranscriptItem[] = [
       { kind: "user_message", id: "p1", text: "Hello", timestamp: "2024-01-01T00:00:00.000Z" },
     ];
@@ -391,7 +422,6 @@ describe("Reload during processing scenario", () => {
       { kind: "user_message", id: "l1", text: "Run this command", timestamp: "2024-01-01T00:00:10.000Z" },
       { kind: "assistant_message", id: "l2", text: "Sure, running it now", timestamp: "2024-01-01T00:00:10.500Z" },
       { kind: "tool_start", id: "t1", toolName: "bash", toolCallId: "tc1", timestamp: "2024-01-01T00:00:11.000Z" },
-      // Tool end not yet received - still executing
     ];
 
     const merged = mergeTranscriptItems(persisted, live);
@@ -399,7 +429,51 @@ describe("Reload during processing scenario", () => {
     expect(merged).toHaveLength(4);
     expect(merged[3].kind).toBe("tool_start");
     expect(merged[3].toolName).toBe("bash");
-    // No tool_end yet
     expect(merged.some((i) => i.kind === "tool_end")).toBe(false);
+  });
+});
+
+describe("Timestamp fidelity", () => {
+  it("live items preserve original event timestamps", () => {
+    const buffer: LiveTurnBuffer = {
+      ...createEmptyLiveTurnBuffer(),
+      isActive: true,
+      turnId: "turn-ts",
+      turnStartedAt: "2024-01-01T00:00:00.000Z",
+      userPrompt: "Test prompt",
+      userMessageTimestamp: "2024-01-01T00:00:00.123Z",
+      items: [
+        {
+          kind: "user_message",
+          id: "live-user-turn-ts",
+          timestamp: "2024-01-01T00:00:00.123Z",
+          text: "Test prompt",
+        },
+        {
+          kind: "assistant_message",
+          id: "live-assistant-turn-ts",
+          timestamp: "2024-01-01T00:00:01.456Z",
+          text: "Response",
+        },
+        {
+          kind: "tool_start",
+          id: "tool-start-tc1",
+          timestamp: "2024-01-01T00:00:02.789Z",
+          toolName: "bash",
+          toolCallId: "tc1",
+        },
+      ],
+      assistantText: "Response",
+      thinkingText: "",
+      toolStarts: [],
+      toolEnds: [],
+    };
+
+    const items = liveTurnBufferToTranscriptItems(buffer);
+
+    // All timestamps should be preserved exactly
+    expect(items[0].timestamp).toBe("2024-01-01T00:00:00.123Z");
+    expect(items[1].timestamp).toBe("2024-01-01T00:00:01.456Z");
+    expect(items[2].timestamp).toBe("2024-01-01T00:00:02.789Z");
   });
 });
