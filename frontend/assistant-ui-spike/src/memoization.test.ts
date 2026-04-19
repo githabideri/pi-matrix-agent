@@ -3,10 +3,49 @@
  *
  * Tests for component memoization logic and content version calculation.
  * These tests verify that components properly detect when props haven't changed.
+ * 
+ * REGRESSION TESTS:
+ * - CustomMessage must re-render when content/thinking changes (issue: aggressive memo)
+ * - Content version must change when any message content grows
  */
 
 import { describe, it, expect } from 'vitest';
 import type { InternalMessage } from './adapter';
+
+/**
+ * Simulate CustomMessage's memo comparison logic.
+ * This mirrors the actual implementation in ChatInterface.tsx.
+ */
+function customMessageShouldUpdate(
+  prevMsg: InternalMessage,
+  nextMsg: InternalMessage,
+  prevIsStreaming: boolean,
+  nextIsStreaming: boolean
+): boolean {
+  const sameRole = prevMsg.role === nextMsg.role;
+  const sameId = prevMsg.id === nextMsg.id;
+  
+  if (!sameRole || !sameId) return true;
+  
+  // Check content equality - must reflect actual rendered content
+  const getFlatContent = (m: InternalMessage) => {
+    if (typeof m.content === 'string') return m.content;
+    return m.content.map(c => c.text).join('');
+  };
+  const sameContent = getFlatContent(prevMsg) === getFlatContent(nextMsg);
+  const sameThinking = prevMsg.thinking === nextMsg.thinking;
+  
+  // Tool-specific checks
+  if (prevMsg.role === 'tool') {
+    return !sameContent ||
+           (prevMsg.toolCallId !== nextMsg.toolCallId) ||
+           (prevMsg.toolResult !== nextMsg.toolResult) ||
+           (prevMsg.toolArguments !== nextMsg.toolArguments) ||
+           (prevMsg.toolSuccess !== nextMsg.toolSuccess);
+  }
+  
+  return !sameContent || !sameThinking || prevIsStreaming !== nextIsStreaming;
+}
 
 /**
  * Simulate MessageContent's memo comparison logic.
@@ -68,6 +107,91 @@ function calculateContentVersion(messages: InternalMessage[]): number {
   }
   return version;
 }
+
+describe('CustomMessage Memoization (REGRESSION)', () => {
+  /**
+   * REGRESSION TEST: This test would have caught the original bug.
+   * 
+   * The original CustomMessage comparator only checked id, role, and isStreaming,
+   * completely ignoring content changes. This caused the UI to not update during
+   * streaming when message text grew.
+   */
+  it('CRITICAL: must update when assistant message text content grows during streaming', () => {
+    const baseMessage: InternalMessage = {
+      id: 'msg-001',
+      role: 'assistant',
+      content: [{ type: 'text', text: '' }],
+      createdAt: new Date(),
+    };
+    
+    // Simulate streaming: content grows character by character
+    const step1: InternalMessage = { ...baseMessage, content: [{ type: 'text', text: 'H' }] };
+    const step2: InternalMessage = { ...baseMessage, content: [{ type: 'text', text: 'He' }] };
+    const step3: InternalMessage = { ...baseMessage, content: [{ type: 'text', text: 'Hel' }] };
+    const step4: InternalMessage = { ...baseMessage, content: [{ type: 'text', text: 'Hell' }] };
+    const step5: InternalMessage = { ...baseMessage, content: [{ type: 'text', text: 'Hello' }] };
+    
+    // Each step MUST trigger an update (return true = needs update)
+    expect(customMessageShouldUpdate(baseMessage, step1, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step1, step2, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step2, step3, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step3, step4, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step4, step5, true, true)).toBe(true);
+  });
+  
+  /**
+   * REGRESSION TEST: Thinking content must also trigger updates.
+   */
+  it('CRITICAL: must update when thinking content grows during streaming', () => {
+    const baseMessage: InternalMessage = {
+      id: 'msg-001',
+      role: 'assistant',
+      content: [{ type: 'text', text: '' }],
+      thinking: '',
+      createdAt: new Date(),
+    };
+    
+    // Simulate thinking streaming
+    const step1: InternalMessage = { ...baseMessage, thinking: 'S' };
+    const step2: InternalMessage = { ...baseMessage, thinking: 'St' };
+    const step3: InternalMessage = { ...baseMessage, thinking: 'Ste' };
+    const step4: InternalMessage = { ...baseMessage, thinking: 'Step' };
+    
+    // Each step MUST trigger an update
+    expect(customMessageShouldUpdate(baseMessage, step1, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step1, step2, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step2, step3, true, true)).toBe(true);
+    expect(customMessageShouldUpdate(step3, step4, true, true)).toBe(true);
+  });
+  
+  it('skips update when message content unchanged', () => {
+    const message: InternalMessage = {
+      id: 'msg-001',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Hello world' }],
+      createdAt: new Date(),
+    };
+    
+    expect(customMessageShouldUpdate(message, message, false, false)).toBe(false);
+  });
+  
+  it('updates when message ID changes', () => {
+    const prev: InternalMessage = {
+      id: 'msg-001',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Hello' }],
+      createdAt: new Date(),
+    };
+    const next: InternalMessage = {
+      id: 'msg-002',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Hello' }],
+      createdAt: new Date(),
+    };
+    
+    expect(customMessageShouldUpdate(prev, next, false, false)).toBe(true);
+  });
+});
 
 describe('MessageContent Memoization', () => {
   it('skips update when message content unchanged', () => {

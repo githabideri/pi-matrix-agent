@@ -212,10 +212,33 @@ function CustomMessageImpl({ message, isStreaming }: { message: InternalMessage;
 export const CustomMessage = memo(
   CustomMessageImpl,
   (prevProps, nextProps) => {
-    // Reuse MessageContent's comparison logic
-    return prevProps.message.id === nextProps.message.id &&
-           prevProps.message.role === nextProps.message.role &&
-           prevProps.isStreaming === nextProps.isStreaming;
+    const prevMsg = prevProps.message;
+    const nextMsg = nextProps.message;
+    
+    // Quick exit checks
+    if (prevMsg.id !== nextMsg.id || prevMsg.role !== nextMsg.role || 
+        prevProps.isStreaming !== nextProps.isStreaming) {
+      return false;
+    }
+    
+    // Check content equality - must reflect actual rendered content
+    const getFlatContent = (m: InternalMessage) => {
+      if (typeof m.content === 'string') return m.content;
+      return m.content.map(c => c.text).join('');
+    };
+    const sameContent = getFlatContent(prevMsg) === getFlatContent(nextMsg);
+    const sameThinking = prevMsg.thinking === nextMsg.thinking;
+    
+    // Tool-specific checks
+    if (prevMsg.role === 'tool') {
+      return sameContent && 
+             (prevMsg.toolCallId === nextMsg.toolCallId) &&
+             (prevMsg.toolResult === nextMsg.toolResult) &&
+             (prevMsg.toolArguments === nextMsg.toolArguments) &&
+             (prevMsg.toolSuccess === nextMsg.toolSuccess);
+    }
+    
+    return sameContent && sameThinking;
   }
 );
 
@@ -317,10 +340,12 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
   // Initialize batched processor
   useEffect(() => {
     if (!batchedProcessorRef.current?.initialized) {
-      const initialState = store.getState();
-      const processor = createBatchedEventProcessor(initialState, (newState) => {
-        store.setState(newState);
-      });
+      // Pass getState so batcher reads fresh state at flush time
+      const processor = createBatchedEventProcessor(
+        store.getState(),
+        (newState) => store.setState(newState),
+        () => store.getState()
+      );
       batchedProcessorRef.current = { processor, initialized: true };
     }
     

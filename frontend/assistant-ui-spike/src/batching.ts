@@ -14,8 +14,6 @@ import { processEvent } from './adapter';
  */
 interface BatchedStateBuffer {
   pendingEvents: WebUIEvent[];
-  baseState: AdapterState;
-  computedState: AdapterState | null;
   resolve: ((state: AdapterState) => void) | null;
   rafId: number | null;
 }
@@ -25,10 +23,15 @@ interface BatchedStateBuffer {
  * 
  * Events are buffered and processed together at the next requestAnimationFrame,
  * reducing the number of store updates during high-frequency streaming.
+ * 
+ * Key design: Does NOT maintain internal base state. At flush time, reads
+ * current store state to ensure events are applied to fresh state that
+ * includes any external updates (optimistic messages, transcript reloads, etc.)
  */
 export function createBatchedEventProcessor(
-  initialState: AdapterState,
-  onStateUpdate: (state: AdapterState) => void
+  _initialState: AdapterState,
+  onStateUpdate: (state: AdapterState) => void,
+  getStateFromStore: () => AdapterState
 ): {
   processEvent: (event: WebUIEvent) => void;
   flush: () => Promise<AdapterState>;
@@ -37,8 +40,6 @@ export function createBatchedEventProcessor(
 } {
   const buffer: BatchedStateBuffer = {
     pendingEvents: [],
-    baseState: initialState,
-    computedState: null,
     resolve: null,
     rafId: null,
   };
@@ -51,15 +52,14 @@ export function createBatchedEventProcessor(
       
       if (buffer.pendingEvents.length === 0) return;
       
-      // Process all pending events in sequence
-      let newState = buffer.baseState;
+      // CRITICAL: Read FRESH state from store at flush time
+      // This ensures events are applied to current state including any
+      // external updates (optimistic messages, transcript reloads, etc.)
+      let newState = getStateFromStore();
       for (const event of buffer.pendingEvents) {
         newState = processEvent(newState, event);
       }
       
-      // Update base state
-      buffer.baseState = newState;
-      buffer.computedState = newState;
       buffer.pendingEvents = [];
       
       // Notify subscribers
@@ -84,8 +84,8 @@ export function createBatchedEventProcessor(
       return new Promise<AdapterState>((resolve) => {
         buffer.resolve = resolve;
         if (buffer.pendingEvents.length === 0) {
-          // No pending events, resolve immediately
-          resolve(buffer.baseState);
+          // No pending events, resolve with current store state
+          resolve(getStateFromStore());
         }
         // Otherwise, will resolve in scheduleUpdate
       });
@@ -100,7 +100,8 @@ export function createBatchedEventProcessor(
     },
     
     getState: (): AdapterState => {
-      return buffer.computedState || buffer.baseState;
+      // Delegate to store - we don't maintain internal state
+      return getStateFromStore();
     },
   };
 }
