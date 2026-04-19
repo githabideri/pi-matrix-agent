@@ -290,3 +290,17 @@ Phase 1 delivers:
 **Note:** Transcript API was intentionally left unchanged - existing format is already suitable.
 
 Phase 2 will build the actual rich UI on top of this contract.
+
+## Runtime Protocol Migration
+
+**Migration Target**: The WebUI integration is migrating toward a new runtime protocol defined in [`docs/runtime-protocol-v2.md`](./runtime-protocol-v2.md).
+
+This new protocol defines:
+- Canonical runtime message model with nested parts (text, reasoning, tool-call, tool-result)
+- Canonical stream event model (snapshot, message lifecycle, tool lifecycle, turn lifecycle)
+- Clear separation of persisted vs. live-only data
+- Capabilities advertisement (interrupt, stop, etc.)
+
+**Current State**: The current implementation uses the existing WebUI event schema. The new runtime protocol types have been added as additive types for future migration.
+
+**See**: [`docs/runtime-protocol-v2.md`](./runtime-protocol-v2.md) for the full migration plan.

@@ -104,18 +104,27 @@ export type TranscriptItem =
 
 /**
  * Prompt submission response from POST /api/live/rooms/:roomKey/prompt
+ *
+ * Note: turnId is NOT in the response. The SSE stream provides the authoritative
+ * turnId via the turn_start event. This is by design - the POST endpoint is
+ * non-blocking and returns immediately without waiting for inference.
  */
 export interface PromptResponse {
   accepted: boolean;
   roomKey: string;
   roomId: string;
   sessionId: string;
-  turnId: string;
   timestamp: string;
+  // Note: turnId is intentionally NOT included
+  // The authoritative turnId comes from SSE via turn_start event
 }
 
 /**
  * SSE Event Types (normalized WebUI events)
+ *
+ * Note: The authoritative turnId comes from SSE events (turn_start, etc.),
+ * NOT from the POST /prompt response. The POST endpoint is non-blocking
+ * and returns immediately without waiting for inference.
  */
 export type WebUIEvent =
   | SessionConnectedEvent

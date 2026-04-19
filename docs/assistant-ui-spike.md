@@ -452,6 +452,20 @@ A full migration from the current operator UI to assistant-ui would require:
 - [x] Build succeeds
 - [x] Documentation
 
+## Runtime Protocol Migration
+
+**Migration Target**: The spike is migrating toward a new runtime protocol defined in [`docs/runtime-protocol-v2.md`](./runtime-protocol-v2.md).
+
+This new protocol defines:
+- Canonical runtime message model with nested parts
+- Canonical stream event model (snapshot, message lifecycle, tool lifecycle)
+- Clear separation of persisted vs. live-only data
+- Capabilities advertisement (interrupt, stop, etc.)
+
+**Current State**: The spike uses the existing WebUI event schema. The new runtime protocol types have been added as additive types for future migration.
+
+**See**: [`docs/runtime-protocol-v2.md`](./runtime-protocol-v2.md) for the full migration plan.
+
 ## Design Principle
 
 > **The browser never owns sessions, config, providers, or state.**
