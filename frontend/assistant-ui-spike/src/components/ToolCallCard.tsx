@@ -2,9 +2,10 @@
  * Tool Call Card Component
  * 
  * Displays a tool call in a structured card format.
+ * Memoized to prevent unnecessary re-renders during streaming.
  */
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 interface ToolCallCardProps {
   toolName: string;
@@ -12,7 +13,7 @@ interface ToolCallCardProps {
   toolCallId?: string;
 }
 
-export function ToolCallCard({ toolName, arguments: args, toolCallId }: ToolCallCardProps) {
+function ToolCallCardImpl({ toolName, arguments: args, toolCallId }: ToolCallCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   return (
@@ -45,5 +46,16 @@ export function ToolCallCard({ toolName, arguments: args, toolCallId }: ToolCall
     </div>
   );
 }
+
+export const ToolCallCard = memo(
+  ToolCallCardImpl,
+  (prevProps, nextProps) => {
+    return prevProps.toolName === nextProps.toolName &&
+           prevProps.arguments === nextProps.arguments &&
+           prevProps.toolCallId === nextProps.toolCallId;
+  }
+);
+
+ToolCallCard.displayName = 'ToolCallCard';
 
 export default ToolCallCard;

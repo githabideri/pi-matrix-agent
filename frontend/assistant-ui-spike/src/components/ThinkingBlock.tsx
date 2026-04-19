@@ -3,16 +3,17 @@
  * 
  * Displays assistant reasoning/thinking in a collapsible section.
  * Collapsed by default, visually distinct from the final answer.
+ * Memoized to prevent unnecessary re-renders during streaming.
  */
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 interface ThinkingBlockProps {
   content: string;
   isStreaming?: boolean;
 }
 
-export function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
+function ThinkingBlockImpl({ content, isStreaming }: ThinkingBlockProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Show first few lines when collapsed
@@ -51,5 +52,15 @@ export function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
     </div>
   );
 }
+
+export const ThinkingBlock = memo(
+  ThinkingBlockImpl,
+  (prevProps, nextProps) => {
+    return prevProps.content === nextProps.content && 
+           prevProps.isStreaming === nextProps.isStreaming;
+  }
+);
+
+ThinkingBlock.displayName = 'ThinkingBlock';
 
 export default ThinkingBlock;

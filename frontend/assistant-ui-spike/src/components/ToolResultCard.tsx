@@ -2,9 +2,10 @@
  * Tool Result Card Component
  * 
  * Displays a tool result in a structured card format.
+ * Memoized to prevent unnecessary re-renders during streaming.
  */
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 interface ToolResultCardProps {
   toolName: string;
@@ -14,7 +15,7 @@ interface ToolResultCardProps {
   toolCallId?: string;
 }
 
-export function ToolResultCard({ toolName, success, result, error, toolCallId }: ToolResultCardProps) {
+function ToolResultCardImpl({ toolName, success, result, error, toolCallId }: ToolResultCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasOutput = !!(result || error);
   
@@ -58,5 +59,18 @@ export function ToolResultCard({ toolName, success, result, error, toolCallId }:
     </div>
   );
 }
+
+export const ToolResultCard = memo(
+  ToolResultCardImpl,
+  (prevProps, nextProps) => {
+    return prevProps.toolName === nextProps.toolName &&
+           prevProps.success === nextProps.success &&
+           prevProps.result === nextProps.result &&
+           prevProps.error === nextProps.error &&
+           prevProps.toolCallId === nextProps.toolCallId;
+  }
+);
+
+ToolResultCard.displayName = 'ToolResultCard';
 
 export default ToolResultCard;

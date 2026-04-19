@@ -14,7 +14,7 @@
  * - Custom app shell, top bar, and states
  */
 
-import React, { useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useCallback, useRef, useSyncExternalStore, memo } from 'react';
 import { 
   useExternalStoreRuntime,
   Thread,
@@ -32,6 +32,7 @@ import {
 } from './adapter';
 import type { WebUIEvent } from './types';
 import { normalizeMessage } from './normalization';
+import { createBatchedEventProcessor } from './batching';
 
 // Custom components
 import { AppShell } from './components/AppShell';
@@ -75,8 +76,9 @@ interface ChatInterfaceProps {
 /**
  * Custom message content renderer.
  * Handles thinking blocks, tool cards, and markdown content.
+ * Memoized to prevent unnecessary re-renders during streaming.
  */
-function MessageContent({ 
+function MessageContentImpl({ 
   message, 
   isStreaming 
 }: { 
@@ -97,7 +99,7 @@ function MessageContent({
   if (isUser) {
     return (
       <div className="user-message-content">
-        <MarkdownRenderer text={textContent} />
+        <MarkdownRenderer text={textContent} isStreaming={isStreaming} />
       </div>
     );
   }
@@ -126,7 +128,7 @@ function MessageContent({
         />
       );
     }
-    return <MarkdownRenderer text={textContent} />;
+    return <MarkdownRenderer text={textContent} isStreaming={isStreaming} />;
   }
 
   // Assistant message with optional thinking
@@ -135,7 +137,7 @@ function MessageContent({
       {message.thinking && (
         <ThinkingBlock content={message.thinking} isStreaming={isStreaming} />
       )}
-      {textContent && <MarkdownRenderer text={textContent} />}
+      {textContent && <MarkdownRenderer text={textContent} isStreaming={isStreaming} />}
       {isStreaming && (
         <span className="streaming-cursor">▊</span>
       )}
@@ -143,11 +145,48 @@ function MessageContent({
   );
 }
 
+export const MessageContent = memo(
+  MessageContentImpl,
+  (prevProps, nextProps) => {
+    const prevMsg = prevProps.message;
+    const nextMsg = nextProps.message;
+    
+    // Deep equality check for message content
+    const sameRole = prevMsg.role === nextMsg.role;
+    const sameId = prevMsg.id === nextMsg.id;
+    
+    if (!sameRole || !sameId) return false;
+    
+    // Check content equality
+    const getFlatContent = (m: InternalMessage) => {
+      if (typeof m.content === 'string') return m.content;
+      return m.content.map(c => c.text).join('');
+    };
+    const sameContent = getFlatContent(prevMsg) === getFlatContent(nextMsg);
+    const sameThinking = prevMsg.thinking === nextMsg.thinking;
+    const sameStreaming = prevProps.isStreaming === nextProps.isStreaming;
+    
+    // Tool-specific checks
+    if (prevMsg.role === 'tool') {
+      return sameStreaming && 
+             (prevMsg.toolCallId === nextMsg.toolCallId) &&
+             (prevMsg.toolResult === nextMsg.toolResult) &&
+             (prevMsg.toolArguments === nextMsg.toolArguments) &&
+             (prevMsg.toolSuccess === nextMsg.toolSuccess);
+    }
+    
+    return sameContent && sameThinking && sameStreaming;
+  }
+);
+
+MessageContent.displayName = 'MessageContent';
+
 /**
  * Custom message component that renders user/assistant messages
  * with proper avatars, bubbles, and positioning.
+ * Memoized to prevent unnecessary re-renders during streaming.
  */
-function CustomMessage({ message, isStreaming }: { message: InternalMessage; isStreaming: boolean }) {
+function CustomMessageImpl({ message, isStreaming }: { message: InternalMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user';
   
   return (
@@ -169,6 +208,18 @@ function CustomMessage({ message, isStreaming }: { message: InternalMessage; isS
     </div>
   );
 }
+
+export const CustomMessage = memo(
+  CustomMessageImpl,
+  (prevProps, nextProps) => {
+    // Reuse MessageContent's comparison logic
+    return prevProps.message.id === nextProps.message.id &&
+           prevProps.message.role === nextProps.message.role &&
+           prevProps.isStreaming === nextProps.isStreaming;
+  }
+);
+
+CustomMessage.displayName = 'CustomMessage';
 
 /**
  * Custom messages list that renders thinking blocks separately from text.
@@ -260,14 +311,40 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     loadInitialData();
   }, [roomKey, store]);
 
-  // Set up SSE event stream
+  // Batched event processor for SSE updates
+  const batchedProcessorRef = useRef<{ processor: any; initialized: boolean } | null>(null);
+  
+  // Initialize batched processor
+  useEffect(() => {
+    if (!batchedProcessorRef.current?.initialized) {
+      const initialState = store.getState();
+      const processor = createBatchedEventProcessor(initialState, (newState) => {
+        store.setState(newState);
+      });
+      batchedProcessorRef.current = { processor, initialized: true };
+    }
+    
+    return () => {
+      if (batchedProcessorRef.current?.processor) {
+        batchedProcessorRef.current.processor.clear();
+      }
+    };
+  }, [store]);
+  
+  // Set up SSE event stream with batching
   useEffect(() => {
     const cleanup = createEventStream(roomKey, (event: WebUIEvent) => {
-      const currentState = store.getState();
-      const newState = processEvent(currentState, event);
-      store.setState(newState);
+      // Use batched processor for performance
+      if (batchedProcessorRef.current?.processor) {
+        batchedProcessorRef.current.processor.processEvent(event);
+      } else {
+        // Fallback to direct processing if batcher not ready
+        const currentState = store.getState();
+        const newState = processEvent(currentState, event);
+        store.setState(newState);
+      }
       
-      // Update room data if model changes
+      // Update room data if model changes (not batched - immediate)
       if (event.type === 'state_change' && event.state?.model) {
         setRoomData({ model: event.state.model });
       }
@@ -290,28 +367,39 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     setIsNearBottom(checkIsNearBottom());
   }, [checkIsNearBottom]);
 
-  // Generate a content hash that changes when any message content changes
-  // This ensures scroll updates trigger on both new messages AND content growth
-  const contentHash = React.useMemo(() => {
-    let hash = liveState.messages.length;
+  // Generate a content version that changes when any message content changes
+  // Uses actual text content length for reliable content growth tracking
+  const contentVersion = React.useMemo(() => {
+    let version = 0;
     for (const msg of liveState.messages) {
-      hash += (msg.content as any)?.length || 0;
-      hash += (msg.thinking?.length || 0) || 0;
+      // Count text content length
+      if (typeof msg.content === 'string') {
+        version += msg.content.length;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === 'text') {
+            version += (part.text?.length || 0);
+          }
+        }
+      }
+      // Count thinking content length
+      version += (msg.thinking?.length || 0);
+      // Count tool result/arguments length
+      version += (msg.toolResult?.length || 0);
+      version += (msg.toolArguments?.length || 0);
     }
-    return hash;
+    return version;
   }, [liveState.messages]);
 
   // Scroll to bottom when messages change or content grows - only if user is near bottom
   useEffect(() => {
     if (isNearBottom && messagesEndRef.current) {
-      // Small delay to ensure DOM is updated
+      // Use requestAnimationFrame to ensure DOM is updated before scrolling
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       });
     }
-  }, [contentHash, isNearBottom]);
+  }, [contentVersion, isNearBottom]);
 
   // Listen to scroll events to update isNearBottom
   useEffect(() => {
