@@ -151,7 +151,84 @@ export class PiSessionBackend {
       if (event.type === "agent_end" || event.type === "turn_end") {
         this.updateSnapshotFromSession(roomState, session);
       }
+
+      // Populate live turn buffer for transcript reconstruction during processing
+      this.handleLiveTurnEvent(roomId, event);
     });
+  }
+
+  /**
+   * Handle session events to populate the live turn buffer.
+   * This enables transcript reconstruction during processing (reload scenario).
+   */
+  private handleLiveTurnEvent(roomId: string, event: any): void {
+    switch (event.type) {
+      case "turn_start": {
+        // Reset buffer and capture turn start info
+        this.roomStateManager.resetLiveTurnBuffer(roomId);
+        let promptPreview: string | undefined;
+        if (event.userMessage?.content) {
+          if (typeof event.userMessage.content === "string") {
+            promptPreview = event.userMessage.content;
+          } else if (Array.isArray(event.userMessage.content)) {
+            const textParts = event.userMessage.content
+              .filter((part: any) => part.type === "text")
+              .map((part: any) => part.text)
+              .join("");
+            promptPreview = textParts;
+          }
+        }
+        const turnId = event.turnId || `turn-${Date.now()}`;
+        this.roomStateManager.updateLiveTurnStart(roomId, turnId, promptPreview);
+        break;
+      }
+
+      case "message_update": {
+        // Handle assistant message updates (text and thinking)
+        const assistantMessageEvent = event.assistantMessageEvent;
+        if (assistantMessageEvent) {
+          if (assistantMessageEvent.type === "text_delta") {
+            this.roomStateManager.appendAssistantText(roomId, assistantMessageEvent.delta);
+          } else if (assistantMessageEvent.type === "thinking_delta") {
+            this.roomStateManager.appendThinkingText(roomId, assistantMessageEvent.delta);
+          }
+        }
+        break;
+      }
+
+      case "tool_execution_start": {
+        // Handle tool execution start
+        const toolExecutionEvent = event.toolExecutionEvent;
+        if (toolExecutionEvent) {
+          const toolCallId = toolExecutionEvent.toolCallId || `tool-${Date.now()}`;
+          const toolArgs = JSON.stringify(toolExecutionEvent.arguments);
+          this.roomStateManager.addToolStart(roomId, toolCallId, toolExecutionEvent.name, toolArgs);
+        }
+        break;
+      }
+
+      case "tool_execution_end": {
+        // Handle tool execution end
+        const toolResultEvent = event.toolResultEvent;
+        if (toolResultEvent) {
+          const toolCallId = toolResultEvent.toolCallId || `tool-${Date.now()}`;
+          this.roomStateManager.addToolEnd(
+            roomId,
+            toolCallId,
+            toolResultEvent.name,
+            !toolResultEvent.isError,
+            String(toolResultEvent.result || ""),
+            toolResultEvent.isError ? String(toolResultEvent.error) : undefined,
+          );
+        }
+        break;
+      }
+
+      case "turn_end":
+        // Mark turn as ended
+        this.roomStateManager.endLiveTurn(roomId);
+        break;
+    }
   }
 
   /**

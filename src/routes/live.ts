@@ -2,7 +2,12 @@ import { type Request, type Response, Router } from "express";
 import type { MatrixTransport } from "../matrix.js";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
-import { buildLiveTranscript } from "../transcript.js";
+import {
+  buildLiveTranscript,
+  liveTurnBufferToTranscriptItems,
+  mergeTranscriptItems,
+  type TranscriptItem,
+} from "../transcript.js";
 import type { AcceptedPromptResponse, ContextResponse, LiveRoomDetail, LiveRoomListItem } from "../types.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
 
@@ -142,22 +147,46 @@ export function routeLive(
       return res.status(404).json({ error: "Room not found" });
     }
 
-    // If processing, return minimal response immediately
-    if (roomState.isProcessing) {
-      return res.json({
-        roomId: roomState.roomId,
-        roomKey: roomKey,
-        sessionId: roomState.sessionId,
-        sessionFile: roomState.sessionFile,
-        relativeSessionPath: roomState.sessionFile
-          ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
-          : undefined,
-        items: [], // Empty while processing - file may be locked
-        isProcessing: true,
-      });
-    }
-
     try {
+      let persistedItems: TranscriptItem[] = [];
+      let liveItems: TranscriptItem[] = [];
+
+      // Case 1: Room is processing - return persisted + live items
+      if (roomState.isProcessing) {
+        // Get persisted transcript from session file (if exists)
+        if (roomState.sessionFile) {
+          try {
+            const persistedTranscript = await buildLiveTranscript(roomState.sessionId || "", roomState.sessionFile, {
+              baseDir: workingDirectory,
+            });
+            persistedItems = persistedTranscript.items;
+          } catch (err) {
+            console.warn(`Warning: Could not read persisted transcript for ${roomKey}:`, err);
+            // Continue with empty persisted items
+          }
+        }
+
+        // Get live current-turn items from the buffer
+        const liveTurnBuffer = piBackend.getRoomStateManager().getLiveTurnBuffer(roomState.roomId);
+        liveItems = liveTurnBufferToTranscriptItems(liveTurnBuffer);
+
+        // Merge persisted and live items with deduplication
+        const mergedItems = mergeTranscriptItems(persistedItems, liveItems);
+
+        return res.json({
+          roomId: roomState.roomId,
+          roomKey: roomKey,
+          sessionId: roomState.sessionId,
+          sessionFile: roomState.sessionFile,
+          relativeSessionPath: roomState.sessionFile
+            ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
+            : undefined,
+          items: mergedItems,
+          isProcessing: true,
+        });
+      }
+
+      // Case 2: Room is not processing - return persisted transcript only
       const transcript = await buildLiveTranscript(roomState.sessionId || "", roomState.sessionFile, {
         baseDir: workingDirectory,
       });

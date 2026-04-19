@@ -260,3 +260,153 @@ export async function buildLiveTranscript(
     items: [],
   };
 }
+
+/**
+ * Live turn buffer types (imported from room-state for transcript reconstruction).
+ * These are declared here to avoid circular imports.
+ */
+interface LiveTurnBufferForTranscript {
+  isActive: boolean;
+  turnId?: string;
+  turnStartedAt?: string;
+  userPrompt?: string;
+  userMessageTimestamp?: string;
+  assistantText: string;
+  assistantMessageTimestamp?: string;
+  thinkingText: string;
+  thinkingTimestamp?: string;
+  toolStarts: Array<{
+    id: string;
+    timestamp: string;
+    toolName: string;
+    toolCallId?: string;
+    arguments?: string;
+  }>;
+  toolEnds: Array<{
+    id: string;
+    timestamp: string;
+    toolName: string;
+    toolCallId?: string;
+    success: boolean;
+    result?: string;
+    error?: string;
+  }>;
+}
+
+/**
+ * Convert a live turn buffer into transcript items.
+ * This enables transcript reconstruction during processing (reload scenario).
+ */
+export function liveTurnBufferToTranscriptItems(buffer: LiveTurnBufferForTranscript | undefined): TranscriptItem[] {
+  if (!buffer?.isActive) {
+    return [];
+  }
+
+  const items: TranscriptItem[] = [];
+
+  // Add user message item
+  if (buffer.userPrompt) {
+    items.push({
+      kind: "user_message",
+      id: `live-user-${buffer.turnId}`,
+      text: buffer.userPrompt,
+      timestamp: buffer.userMessageTimestamp || buffer.turnStartedAt || new Date().toISOString(),
+    });
+  }
+
+  // Add thinking item if present
+  if (buffer.thinkingText) {
+    items.push({
+      kind: "thinking",
+      id: `live-thinking-${buffer.turnId}`,
+      text: buffer.thinkingText,
+      timestamp: buffer.thinkingTimestamp || buffer.turnStartedAt || new Date().toISOString(),
+    });
+  }
+
+  // Add assistant message item if present
+  if (buffer.assistantText) {
+    items.push({
+      kind: "assistant_message",
+      id: `live-assistant-${buffer.turnId}`,
+      text: buffer.assistantText,
+      timestamp: buffer.assistantMessageTimestamp || buffer.turnStartedAt || new Date().toISOString(),
+    });
+  }
+
+  // Add tool start/end pairs
+  for (const toolStart of buffer.toolStarts) {
+    items.push({
+      kind: "tool_start",
+      id: toolStart.id,
+      toolName: toolStart.toolName,
+      toolCallId: toolStart.toolCallId,
+      arguments: toolStart.arguments,
+      timestamp: toolStart.timestamp,
+    });
+  }
+
+  for (const toolEnd of buffer.toolEnds) {
+    items.push({
+      kind: "tool_end",
+      id: toolEnd.id,
+      toolName: toolEnd.toolName,
+      toolCallId: toolEnd.toolCallId,
+      success: toolEnd.success,
+      result: toolEnd.result,
+      timestamp: toolEnd.timestamp,
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Merge persisted transcript items with live current-turn items.
+ * Handles deduplication to avoid duplicate user prompt items.
+ */
+export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems: TranscriptItem[]): TranscriptItem[] {
+  // If no live items, return persisted items
+  if (liveItems.length === 0) {
+    return persistedItems;
+  }
+
+  // If no persisted items, return live items
+  if (persistedItems.length === 0) {
+    return liveItems;
+  }
+
+  // Check for duplicate user message at the end of persisted items
+  // This happens when the persisted transcript already contains the current user prompt
+  const persistedUserMessage = [...persistedItems]
+    .reverse()
+    .find((item: TranscriptItem) => item.kind === "user_message");
+  const liveUserMessage = liveItems.find((item: TranscriptItem) => item.kind === "user_message");
+
+  let mergedItems: TranscriptItem[];
+
+  if (persistedUserMessage && liveUserMessage) {
+    // Check if they have the same text (potential duplicate)
+    // Use a fuzzy comparison for robustness
+    const persistedText = persistedUserMessage.text.trim();
+    const liveText = liveUserMessage.text.trim();
+
+    // If texts match or one contains the other, consider them duplicates
+    const isDuplicate =
+      persistedText === liveText || persistedText.startsWith(liveText) || liveText.startsWith(persistedText);
+
+    if (isDuplicate) {
+      // Remove the duplicate user message from persisted items
+      mergedItems = persistedItems.slice(0, -1);
+    } else {
+      mergedItems = [...persistedItems];
+    }
+  } else {
+    mergedItems = [...persistedItems];
+  }
+
+  // Append live items
+  mergedItems.push(...liveItems);
+
+  return mergedItems;
+}

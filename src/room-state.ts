@@ -12,6 +12,80 @@ export interface RoomSnapshot {
 }
 
 /**
+ * Live turn state buffer for the current in-flight turn.
+ * This is backend-owned state that tracks the live turn for transcript reconstruction.
+ * Used to support reload during processing - the transcript endpoint can reconstruct
+ * the current in-flight turn from this buffer.
+ */
+export interface LiveTurnBuffer {
+  /** Whether a turn is currently active */
+  isActive: boolean;
+  /** Current turn ID */
+  turnId?: string;
+  /** Turn start timestamp */
+  turnStartedAt?: string;
+  /** User prompt text for current turn */
+  userPrompt?: string;
+  /** User message timestamp */
+  userMessageTimestamp?: string;
+  /** Accumulated assistant text for current turn */
+  assistantText: string;
+  /** Assistant message timestamp */
+  assistantMessageTimestamp?: string;
+  /** Accumulated thinking/reasoning text for current turn */
+  thinkingText: string;
+  /** Thinking message timestamp */
+  thinkingTimestamp?: string;
+  /** Live tool start items */
+  toolStarts: LiveToolStartItem[];
+  /** Live tool end items */
+  toolEnds: LiveToolEndItem[];
+}
+
+/**
+ * Live tool start item in the buffer.
+ */
+export interface LiveToolStartItem {
+  id: string;
+  timestamp: string;
+  toolName: string;
+  toolCallId?: string;
+  arguments?: string;
+}
+
+/**
+ * Live tool end item in the buffer.
+ */
+export interface LiveToolEndItem {
+  id: string;
+  timestamp: string;
+  toolName: string;
+  toolCallId?: string;
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+/**
+ * Initialize an empty live turn buffer.
+ */
+export function createEmptyLiveTurnBuffer(): LiveTurnBuffer {
+  return {
+    isActive: false,
+    turnId: undefined,
+    turnStartedAt: undefined,
+    userPrompt: undefined,
+    userMessageTimestamp: undefined,
+    assistantText: "",
+    assistantMessageTimestamp: undefined,
+    thinkingText: "",
+    thinkingTimestamp: undefined,
+    toolStarts: [],
+    toolEnds: [],
+  };
+}
+
+/**
  * Live room state tracks the active session and processing state for each Matrix room.
  */
 export interface LiveRoomState {
@@ -25,6 +99,7 @@ export interface LiveRoomState {
   lastEventAt?: Date;
   typingTimeout?: NodeJS.Timeout;
   snapshot?: RoomSnapshot; // Cached snapshot for non-blocking responses
+  liveTurnBuffer?: LiveTurnBuffer; // Live current-turn buffer for transcript reconstruction
 }
 
 /**
@@ -81,6 +156,7 @@ export class RoomStateManager {
         toolNames: ["read", "bash", "edit", "write"], // Default tools
         snapshotAt: new Date(),
       },
+      liveTurnBuffer: createEmptyLiveTurnBuffer(),
     };
 
     this.live.set(roomId, state);
@@ -253,6 +329,117 @@ export class RoomStateManager {
     if (state?.snapshot) {
       Object.assign(state.snapshot, updates, { snapshotAt: new Date() });
     }
+  }
+
+  /**
+   * Reset the live turn buffer for a room (called on turn_start).
+   */
+  resetLiveTurnBuffer(roomId: string): void {
+    const state = this.live.get(roomId);
+    if (state) {
+      state.liveTurnBuffer = createEmptyLiveTurnBuffer();
+    }
+  }
+
+  /**
+   * Update the live turn buffer with turn start info.
+   */
+  updateLiveTurnStart(roomId: string, turnId: string, userPrompt?: string): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      state.liveTurnBuffer.isActive = true;
+      state.liveTurnBuffer.turnId = turnId;
+      state.liveTurnBuffer.turnStartedAt = new Date().toISOString();
+      if (userPrompt) {
+        state.liveTurnBuffer.userPrompt = userPrompt;
+        state.liveTurnBuffer.userMessageTimestamp = new Date().toISOString();
+      }
+    }
+  }
+
+  /**
+   * Append assistant text to the live turn buffer.
+   */
+  appendAssistantText(roomId: string, delta: string): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      if (!state.liveTurnBuffer.assistantMessageTimestamp) {
+        state.liveTurnBuffer.assistantMessageTimestamp = new Date().toISOString();
+      }
+      state.liveTurnBuffer.assistantText += delta;
+    }
+  }
+
+  /**
+   * Append thinking text to the live turn buffer.
+   */
+  appendThinkingText(roomId: string, delta: string): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      if (!state.liveTurnBuffer.thinkingTimestamp) {
+        state.liveTurnBuffer.thinkingTimestamp = new Date().toISOString();
+      }
+      state.liveTurnBuffer.thinkingText += delta;
+    }
+  }
+
+  /**
+   * Add a tool start item to the live turn buffer.
+   */
+  addToolStart(roomId: string, toolCallId: string, toolName: string, toolArgs?: string): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      state.liveTurnBuffer.toolStarts.push({
+        id: `tool-start-${toolCallId}`,
+        timestamp: new Date().toISOString(),
+        toolName,
+        toolCallId,
+        arguments: toolArgs,
+      });
+    }
+  }
+
+  /**
+   * Add a tool end item to the live turn buffer.
+   */
+  addToolEnd(
+    roomId: string,
+    toolCallId: string,
+    toolName: string,
+    success: boolean,
+    result?: string,
+    error?: string,
+  ): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      state.liveTurnBuffer.toolEnds.push({
+        id: `tool-end-${toolCallId}`,
+        timestamp: new Date().toISOString(),
+        toolName,
+        toolCallId,
+        success,
+        result,
+        error,
+      });
+    }
+  }
+
+  /**
+   * Mark the live turn buffer as inactive (called on turn_end).
+   */
+  endLiveTurn(roomId: string): void {
+    const state = this.live.get(roomId);
+    if (state?.liveTurnBuffer) {
+      state.liveTurnBuffer.isActive = false;
+    }
+  }
+
+  /**
+   * Get the live turn buffer for a room.
+   */
+  getLiveTurnBuffer(roomId: string): LiveTurnBuffer | undefined {
+    const state = this.live.get(roomId);
+    return state?.liveTurnBuffer;
   }
 }
 
