@@ -134,7 +134,20 @@ export class WebUIEmitter {
     this.currentTurnId = generateTurnId();
 
     // Extract prompt preview from user message content if available
-    const promptPreview = event.userMessage?.content?.slice?.(0, 50);
+    // Content can be a string or an array of content parts
+    let promptPreview: string | undefined;
+    if (event.userMessage?.content) {
+      if (typeof event.userMessage.content === "string") {
+        promptPreview = event.userMessage.content.slice(0, 50);
+      } else if (Array.isArray(event.userMessage.content)) {
+        // Extract text from content parts
+        const textParts = event.userMessage.content
+          .filter((part: any) => part.type === "text")
+          .map((part: any) => part.text)
+          .join("");
+        promptPreview = textParts.slice(0, 50);
+      }
+    }
 
     this.emit({
       type: "turn_start",
@@ -152,7 +165,21 @@ export class WebUIEmitter {
     // This captures user messages that weren't included in turn_start
     const message = event.message;
     if (message?.role === "user" && message.content) {
-      const promptPreview = message.content.slice(0, 50);
+      // Extract text from content - can be string or array of content parts
+      let promptPreview: string;
+      if (typeof message.content === "string") {
+        promptPreview = message.content.slice(0, 50);
+      } else if (Array.isArray(message.content)) {
+        // Extract text from content parts
+        const textParts = message.content
+          .filter((part: any) => part.type === "text")
+          .map((part: any) => part.text)
+          .join("");
+        promptPreview = textParts.slice(0, 50);
+      } else {
+        return; // Unknown content format
+      }
+
       // Emit a user_message event with the prompt content
       this.emit({
         type: "user_message",
@@ -300,12 +327,7 @@ export function attachEmitterToSSE(res: Response, emitter: WebUIEmitter): () => 
   };
 
   // Handle client disconnect
-  const onClose = () => {
-    console.log(`[SSE] Client disconnected for room ${emitter.roomKey}`);
-    cleanup();
-  };
-
-  res.on("close", onClose);
+  res.on("close", cleanup);
 
   // Set up event handler
   emitter.onEvent((event: WebUIEvent) => {

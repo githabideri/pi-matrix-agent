@@ -317,8 +317,6 @@ export function routeLive(
     // Start emitting events
     emitter.start(roomState!.session);
 
-    console.log(`[SSE] Client connected for room ${roomKey}`);
-
     // Cleanup on client disconnect
     req.on("close", () => {
       console.log(`[SSE] Client disconnected for room ${roomKey}`);
