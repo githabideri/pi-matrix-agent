@@ -2,6 +2,7 @@
  * Composer Component
  * 
  * Input area for composing new messages.
+ * Shows a stop button when processing is active.
  */
 
 import React, { useState, useRef, KeyboardEvent } from 'react';
@@ -9,9 +10,10 @@ import React, { useState, useRef, KeyboardEvent } from 'react';
 interface ComposerProps {
   isProcessing: boolean;
   onSend: (text: string) => void;
+  onInterrupt?: () => void;  // Optional interrupt handler
 }
 
-export function Composer({ isProcessing, onSend }: ComposerProps) {
+export function Composer({ isProcessing, onSend, onInterrupt }: ComposerProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
@@ -44,31 +46,59 @@ export function Composer({ isProcessing, onSend }: ComposerProps) {
     textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
   };
   
+  const handleInterrupt = async () => {
+    if (!onInterrupt || !isProcessing) return;
+    try {
+      await onInterrupt();
+    } catch (error) {
+      console.error('Failed to interrupt:', error);
+    }
+  };
+  
   return (
     <div className="composer">
       <div className="composer-container">
-        <textarea
-          ref={textareaRef}
-          className="composer-input"
-          placeholder="Type a message..."
-          value={text}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          disabled={isProcessing}
-          rows={1}
-          autoFocus
-        />
-        <button
-          className="composer-send-button"
-          onClick={handleSubmit}
-          disabled={!text.trim() || isProcessing}
-          title="Send message (Enter)"
-        >
-          <span className="send-icon">→</span>
-        </button>
+        {isProcessing ? (
+          // Stop button shown when processing
+          <>
+            <div className="composer-processing-placeholder">
+              Processing... use stop button to interrupt
+            </div>
+            <button
+              className="composer-stop-button"
+              onClick={handleInterrupt}
+              title="Stop current operation (Escape)"
+            >
+              <span className="stop-icon">⏹</span>
+            </button>
+          </>
+        ) : (
+          // Normal input shown when not processing
+          <>
+            <textarea
+              ref={textareaRef}
+              className="composer-input"
+              placeholder="Type a message..."
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              disabled={isProcessing}
+              rows={1}
+              autoFocus
+            />
+            <button
+              className="composer-send-button"
+              onClick={handleSubmit}
+              disabled={!text.trim() || isProcessing}
+              title="Send message (Enter)"
+            >
+              <span className="send-icon">→</span>
+            </button>
+          </>
+        )}
       </div>
       <div className="composer-hint">
-        Press Enter to send, Shift+Enter for new line
+        {isProcessing ? 'Press Escape to stop' : 'Press Enter to send, Shift+Enter for new line'}
       </div>
     </div>
   );

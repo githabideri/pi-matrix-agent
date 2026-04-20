@@ -9,6 +9,7 @@ import type {
   TranscriptResponse,
   PromptResponse,
   WebUIEvent,
+  InterruptResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -51,6 +52,23 @@ export async function submitPrompt(
   });
   if (!response.ok) {
     throw new Error(`Failed to submit prompt: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Interrupt the current in-flight prompt for a live room.
+ */
+export async function interruptRoom(roomKey: string): Promise<InterruptResponse> {
+  const response = await fetch(`${API_BASE}/live/rooms/${roomKey}/interrupt`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || `Failed to interrupt: ${response.statusText}`);
   }
   return response.json();
 }

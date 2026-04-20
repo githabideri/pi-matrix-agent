@@ -156,67 +156,62 @@ describe("Interrupt API - integration", () => {
     expect(body.error).toBe("Room is not currently processing");
   });
 
-  it("POST /api/live/rooms/:roomKey/interrupt returns 200 when room is processing", async () => {
-    // Start a prompt in the background
-    const promptPromise = makeRequest(
-      {
-        method: "POST",
-        path: "/api/live/rooms/3bcd0d8c/prompt",
-        headers: { "Content-Type": "application/json", ...authHeader },
-      },
-      JSON.stringify({ text: "test prompt for interrupt" }),
-    );
+  it("POST /api/live/rooms/:roomKey/interrupt succeeds when room is processing", async () => {
+    // NOTE: This test uses a controllable mock session to verify the abort() path is invoked.
+    // We cannot reliably time a real prompt request, so we create a mock session that:
+    // 1. Is already in processing state
+    // 2. Has a trackable abort() method
+    // 3. Resolves waitForIdle() immediately for test determinism
 
-    // Wait a tiny bit for the room to enter processing state
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Try to interrupt
-    const interruptRes = await makeRequest({
-      method: "POST",
-      path: "/api/live/rooms/3bcd0d8c/interrupt",
-      headers: authHeader,
-    });
-
-    // Either succeeds (200) or fails with 400 (already finished due to no API key)
-    // Both are acceptable since the prompt fails quickly without auth
-    if (interruptRes.statusCode === 200) {
-      const body = JSON.parse(interruptRes.body);
-      expect(body.success).toBe(true);
-      expect(body.message).toBe("Interrupt successful");
-      expect(body.roomKey).toBe("3bcd0d8c");
-    } else if (interruptRes.statusCode === 400) {
-      // This is also acceptable - the prompt may have already finished
-      const body = JSON.parse(interruptRes.body);
-      expect(body.error).toBe("Room is not currently processing");
+    // Get the room state
+    const roomState = fixture.backend!.getSessionByKey("3bcd0d8c");
+    if (!roomState) {
+      throw new Error("Room not found - should have been created in beforeEach");
     }
 
-    await promptPromise;
-  });
+    // Create a mock session that tracks abort() calls
+    let abortCalled = false;
+    const mockSession = {
+      ...roomState.session,
+      abort: async () => {
+        abortCalled = true;
+        // The real abort() does: abortRetry(), agent.abort(), waitForIdle()
+        // We simulate successful abort by resolving immediately
+      },
+    } as any;
 
-  it("room state reflects stopped processing after prompt completes", async () => {
-    // Verify room is not processing initially
+    // Replace the session in room state with our mock
+    roomState.session = mockSession;
+    roomState.isProcessing = true;
+    roomState.processingStartedAt = new Date();
+
+    // Verify room is in processing state
     let contextRes = await makeRequest({
       method: "GET",
       path: "/api/live/rooms/3bcd0d8c/context",
       headers: authHeader,
     });
     let context = JSON.parse(contextRes.body);
-    expect(context.isProcessing).toBe(false);
+    expect(context.isProcessing).toBe(true);
 
-    // Start a prompt
-    const promptPromise = makeRequest(
-      {
-        method: "POST",
-        path: "/api/live/rooms/3bcd0d8c/prompt",
-        headers: { "Content-Type": "application/json", ...authHeader },
-      },
-      JSON.stringify({ text: "test" }),
-    );
+    // Call interrupt
+    const interruptRes = await makeRequest({
+      method: "POST",
+      path: "/api/live/rooms/3bcd0d8c/interrupt",
+      headers: authHeader,
+    });
 
-    // Wait for prompt to complete (it fails quickly without auth)
-    await promptPromise;
+    // Verify abort was called
+    expect(abortCalled).toBe(true);
 
-    // Room should be idle again
+    // Verify success response
+    expect(interruptRes.statusCode).toBe(200);
+    const interruptBody = JSON.parse(interruptRes.body);
+    expect(interruptBody.success).toBe(true);
+    expect(interruptBody.message).toBe("Interrupt successful");
+    expect(interruptBody.roomKey).toBe("3bcd0d8c");
+
+    // Verify room state reflects stopped processing
     contextRes = await makeRequest({ method: "GET", path: "/api/live/rooms/3bcd0d8c/context", headers: authHeader });
     context = JSON.parse(contextRes.body);
     expect(context.isProcessing).toBe(false);

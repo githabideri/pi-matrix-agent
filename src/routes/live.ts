@@ -271,6 +271,38 @@ export function routeLive(
     }
   });
 
+  // POST /api/live/rooms/:roomKey/interrupt - Interrupt current in-flight prompt
+  router.post("/:roomKey/interrupt", async (req: Request, res: Response) => {
+    const roomKey = req.params.roomKey;
+    const roomState = piBackend.getSessionByKey(roomKey);
+
+    if (!roomState) {
+      console.log(`[INTERRUPT] Room ${roomKey} not found`);
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    const roomId = roomState.roomId;
+
+    // Check if room is actually processing
+    if (!roomState.isProcessing) {
+      console.log(`[INTERRUPT] Room ${roomKey} is not processing`);
+      return res.status(400).json({ error: "Room is not currently processing" });
+    }
+
+    console.log(`[INTERRUPT] Interrupting room ${roomKey} (${roomId})`);
+
+    try {
+      await piBackend.interrupt(roomId);
+      res.json({ success: true, message: "Interrupt successful", roomKey });
+    } catch (error: any) {
+      console.error(`[INTERRUPT] Error interrupting room ${roomKey}:`, error);
+      if (error.message.includes("not currently processing")) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: `Interrupt failed: ${error.message}` });
+    }
+  });
+
   // GET /api/live/rooms/:roomKey/events - SSE event stream (normalized WebUI events)
   router.get("/:roomKey/events", async (req: Request, res: Response) => {
     const roomKey = req.params.roomKey;

@@ -350,8 +350,7 @@ export class PiSessionBackend {
    * Track in-flight prompts for each room.
    * Used to ensure cleanup happens exactly once when the underlying prompt settles,
    * even if our timeout fires first.
-   * NOTE: The SDK does NOT support real in-flight prompt cancellation.
-   * The prompt() method returns Promise<void> with no way to cancel once started.
+   * NOTE: The SDK supports real in-flight prompt cancellation via session.abort().
    */
   private inFlightPrompts = new Map<string, { promptPromise: Promise<void>; resolveCleanup: () => void }>();
 
@@ -461,6 +460,52 @@ export class PiSessionBackend {
           })
           .finally(resolveCleanup);
       }
+    }
+  }
+
+  /**
+   * Interrupt the current in-flight prompt for a room.
+   * Uses the SDK's session.abort() method to stop the active run.
+   *
+   * This is a real interrupt - it stops the agent's current operation.
+   * The abort() method:
+   * 1. Calls abortRetry() to cancel any in-progress retry
+   * 2. Calls agent.abort() to stop the current run
+   * 3. Awaits agent.waitForIdle() to ensure cleanup
+   *
+   * @param roomId The Matrix room ID
+   * @returns Promise that resolves when the interrupt completes
+   * @throws Error if room is not found or not processing
+   */
+  async interrupt(roomId: string): Promise<void> {
+    console.log(`[PiSessionBackend] Interrupt requested for room ${roomId}`);
+
+    const roomState = this.roomStateManager.get(roomId);
+
+    if (!roomState) {
+      throw new Error(`No active session for room ${roomId}`);
+    }
+
+    // Guard: reject if room is not processing
+    if (!roomState.isProcessing) {
+      throw new Error(`Room ${roomId} is not currently processing. Cannot interrupt.`);
+    }
+
+    try {
+      console.log(`[PiSessionBackend] Calling session.abort() for room ${roomId}`);
+      // Call the SDK's abort method - this is a real interrupt
+      await roomState.session.abort();
+      console.log(`[PiSessionBackend] Abort completed for room ${roomId}`);
+
+      // Clear processing state after abort completes
+      this.roomStateManager.clearProcessing(roomId);
+
+      console.log(`[PiSessionBackend] Interrupt successful for room ${roomId}`);
+    } catch (error: any) {
+      console.error(`[PiSessionBackend] Error during interrupt for room ${roomId}:`, error);
+      // Even if abort throws, clear processing state to allow recovery
+      this.roomStateManager.clearProcessing(roomId);
+      throw new Error(`Interrupt failed: ${error.message}`);
     }
   }
 

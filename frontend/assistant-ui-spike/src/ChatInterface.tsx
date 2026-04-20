@@ -22,7 +22,7 @@ import {
   type AppendMessage,
 } from '@assistant-ui/react';
 
-import { getLiveRoom, getTranscript, submitPrompt, createEventStream } from './api';
+import { getLiveRoom, getTranscript, submitPrompt, createEventStream, interruptRoom } from './api';
 import {
   transcriptToMessages,
   processEvent,
@@ -439,6 +439,17 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
     return () => viewport.removeEventListener('scroll', handleScroll);
   }, [updateIsNearBottom]);
 
+  // Handle interrupt request
+  const handleInterrupt = useCallback(async () => {
+    try {
+      await interruptRoom(roomKey);
+      // State update comes via SSE - no need to manually update
+    } catch (err) {
+      console.error('Failed to interrupt:', err);
+      // Don't set error state - just log it
+    }
+  }, [roomKey]);
+
   // Handle prompt submission - sends to server
   // Accepts AppendMessage type as per assistant-ui contract
   const handleOnNew = useCallback(
@@ -548,6 +559,7 @@ export function ChatInterface({ roomKey }: ChatInterfaceProps) {
                 runConfig: undefined,
                 attachments: [],
               })}
+              onInterrupt={handleInterrupt}
             />
           </Thread.ViewportFooter>
           

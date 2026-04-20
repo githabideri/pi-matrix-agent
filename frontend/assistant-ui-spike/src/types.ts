@@ -122,6 +122,15 @@ export interface PromptResponse {
 }
 
 /**
+ * Interrupt response from POST /api/live/rooms/:roomKey/interrupt
+ */
+export interface InterruptResponse {
+  success: boolean;
+  message: string;
+  roomKey: string;
+}
+
+/**
  * SSE Event Types (normalized WebUI events)
  *
  * Note: The authoritative turnId comes from SSE events (turn_start, etc.),
