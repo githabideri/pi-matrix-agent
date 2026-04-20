@@ -838,8 +838,9 @@ describe('Transcript Snapshot Rehydration', () => {
     // Verify session ID was updated
     expect(newState.sessionId).toBe('session-001');
 
-    // Verify streaming state was cleared
-    expect(newState.currentAssistantMessageId).toBeUndefined();
+    // Verify streaming state
+    // currentAssistantMessageId is NOW set to the tail assistant message (correct behavior after fix)
+    expect(newState.currentAssistantMessageId).toBe('msg-assistant_message-a1');
     expect(newState.currentTurnId).toBeUndefined();
   });
 
@@ -907,7 +908,7 @@ describe('Transcript Snapshot Rehydration', () => {
 
     expect(newState.messages).toHaveLength(3);
     expect(newState.messages[1].role).toBe('tool');
-    expect((newState.messages[1] as any).toolName).toBe('bash');
+    expect((newState.messages[1] as any).name).toBe('bash');
     expect((newState.messages[1] as any).toolArguments).toBe('{"command": "ls"}');
     expect(newState.messages[2].role).toBe('tool');
     expect((newState.messages[2] as any).toolResult).toBe('file1.txt\nfile2.txt');
@@ -2590,6 +2591,251 @@ describe('Snapshot Continuation - Tail-Aware Rules', () => {
       // New assistant created
       expect(state.messages[4].role).toBe('assistant');
       expect((state.messages[4].content as any[])[0]?.text).toBe('Here are the files:');
+    });
+  });
+});
+
+describe('Snapshot Tail Anchoring - Exact Segment Selection', () => {
+  const baseState: AdapterState = {
+    roomKey: 'test-room',
+    sessionId: 'session-001',
+    messages: [],
+    isProcessing: false,
+    activeToolCalls: new Map(),
+  };
+
+  describe('Tail assistant segment is chosen, not first assistant', () => {
+    it('rehydrates with currentAssistantMessageId pointing to tail assistant (a2), not first (a1)', () => {
+      // Snapshot with split assistant segments:
+      // user_message -> assistant_message a1 -> tool_start -> tool_end -> assistant_message a2
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Complex task',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'I\'ll help with that.',
+          },
+          {
+            kind: 'tool_start',
+            id: 't1',
+            timestamp: '2024-01-01T00:00:02.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+          },
+          {
+            kind: 'tool_end',
+            id: 't2',
+            timestamp: '2024-01-01T00:00:03.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+            success: true,
+            result: 'content',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a2',
+            timestamp: '2024-01-01T00:00:04.000Z',
+            text: 'Based on the file',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // CRITICAL: currentAssistantMessageId must point to a2 (tail), not a1 (first)
+      expect(state.currentAssistantMessageId).toBe('msg-assistant_message-a2');
+      expect(state.currentAssistantMessageId).not.toBe('msg-assistant_message-a1');
+      
+      // Verify snapshotTailKind is set
+      expect(state.snapshotTailKind).toBe('assistant_message');
+      
+      // Verify all messages were rehydrated
+      expect(state.messages).toHaveLength(5);
+    });
+  });
+
+  describe('Delta after split assistant snapshot continues tail segment', () => {
+    it('applies transcript_snapshot then live delta - delta appends to a2, not a1', () => {
+      // Start with base state
+      let state = baseState;
+
+      // Apply REAL transcript_snapshot event with split assistant segments
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Complex task',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'I\'ll help with that.',
+          },
+          {
+            kind: 'tool_start',
+            id: 't1',
+            timestamp: '2024-01-01T00:00:02.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+          },
+          {
+            kind: 'tool_end',
+            id: 't2',
+            timestamp: '2024-01-01T00:00:03.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+            success: true,
+            result: 'content',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a2',
+            timestamp: '2024-01-01T00:00:04.000Z',
+            text: 'Based on the file',
+          },
+        ],
+      };
+
+      state = processEvent(state, snapshotEvent);
+
+      // Verify rehydration
+      expect(state.currentAssistantMessageId).toBe('msg-assistant_message-a2');
+      expect(state.messages).toHaveLength(5);
+
+      // Apply LIVE message_update text delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:05.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: ', here is the answer.' },
+      };
+
+      state = processEvent(state, deltaEvent);
+
+      // Should still have 5 messages (no new assistant created)
+      expect(state.messages).toHaveLength(5);
+      
+      // Segment a1 should be UNCHANGED
+      expect((state.messages[1].content as any[])[0]?.text).toBe('I\'ll help with that.');
+      
+      // Segment a2 should receive the appended delta
+      expect((state.messages[4].content as any[])[0]?.text).toBe('Based on the file, here is the answer.');
+    });
+  });
+
+  describe('Thinking-tail case anchors to exact thinking segment', () => {
+    it('rehydrates with currentAssistantMessageId pointing to the exact tail thinking item', () => {
+      // Snapshot with thinking at tail
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Analyze this',
+          },
+          {
+            kind: 'thinking',
+            id: 'th1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Let me think through this...',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // CRITICAL: currentAssistantMessageId must point to the exact thinking item
+      expect(state.currentAssistantMessageId).toBe('msg-thinking-th1');
+      expect(state.snapshotTailKind).toBe('thinking');
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[1].thinking).toBe('Let me think through this...');
+    });
+
+    it('next thinking_delta continues the exact tail thinking segment', () => {
+      let state = baseState;
+
+      // Apply snapshot with thinking at tail
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Analyze this',
+          },
+          {
+            kind: 'thinking',
+            id: 'th1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Let me think through this...',
+          },
+        ],
+      };
+
+      state = processEvent(state, snapshotEvent);
+      expect(state.currentAssistantMessageId).toBe('msg-thinking-th1');
+
+      // Apply LIVE thinking_delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'thinking_delta', delta: '\nStep by step analysis.' },
+      };
+
+      state = processEvent(state, deltaEvent);
+
+      // Should still have 2 messages
+      expect(state.messages).toHaveLength(2);
+      // Thinking should be appended
+      expect(state.messages[1].thinking).toBe('Let me think through this...\nStep by step analysis.');
     });
   });
 });

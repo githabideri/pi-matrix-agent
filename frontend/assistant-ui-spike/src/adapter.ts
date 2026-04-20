@@ -306,28 +306,17 @@ export function rehydrateFromSnapshot(
       case 'assistant_message':
         // Rule A: snapshot ends with assistant_message → continue that message
         snapshotTailKind = 'assistant_message';
-        {
-          const assistantMsg = messages.find(m => m.role === 'assistant' && 
-            typeof m.content !== 'string' && m.content.length > 0 &&
-            m.content.some(c => c.type === 'text' && typeof c.text === 'string'));
-          if (assistantMsg) {
-            currentAssistantMessageId = assistantMsg.id;
-          }
-        }
+        // Anchor to the EXACT tail assistant segment, not "some assistant with text"
+        // Use direct mapping from the tail transcript item itself
+        currentAssistantMessageId = generateMessageId(lastItem.kind, lastItem.id);
         break;
 
       case 'thinking':
         // Rule B: snapshot ends with thinking → continue the thinking segment
         snapshotTailKind = 'thinking';
-        {
-          // Find the assistant message with thinking content at the end
-          for (let i = messages.length - 1; i >= 0; i--) {
-            if (messages[i].role === 'assistant' && messages[i].thinking) {
-              currentAssistantMessageId = messages[i].id;
-              break;
-            }
-          }
-        }
+        // Anchor to the EXACT tail thinking segment, not "some assistant with thinking"
+        // Use direct mapping from the tail transcript item itself
+        currentAssistantMessageId = generateMessageId(lastItem.kind, lastItem.id);
         break;
 
       case 'tool_start':
