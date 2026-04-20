@@ -752,6 +752,227 @@ describe("Live turn buffer mutation path - Ordered segments", () => {
   });
 });
 
+describe("buildAuthoritativeTranscript helper", () => {
+  it("returns empty array when no session file and not processing", async () => {
+    const { buildAuthoritativeTranscript } = await import("../../src/transcript.js");
+
+    const items = await buildAuthoritativeTranscript("test-session", undefined, undefined, false, { baseDir: "/test" });
+
+    expect(items).toEqual([]);
+  });
+
+  it("returns persisted items only when not processing", async () => {
+    const { buildAuthoritativeTranscript } = await import("../../src/transcript.js");
+
+    // Create a temp session file
+    const fs = await import("fs/promises");
+    const tmpDir = await fs.mkdtemp("/tmp/test-");
+    const sessionFile = `${tmpDir}/test.jsonl`;
+
+    const sessionContent = [
+      JSON.stringify({ type: "session", id: "test-session" }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-001",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Hello" }] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-002",
+        timestamp: "2024-01-01T00:00:01.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Hi there!" }] },
+      }),
+    ].join("\n");
+
+    await fs.writeFile(sessionFile, sessionContent);
+
+    try {
+      const items = await buildAuthoritativeTranscript("test-session", sessionFile, undefined, false, {
+        baseDir: tmpDir,
+      });
+
+      expect(items).toHaveLength(2);
+      expect(items[0].kind).toBe("user_message");
+      expect(items[0].text).toBe("Hello");
+      expect(items[1].kind).toBe("assistant_message");
+      expect(items[1].text).toBe("Hi there!");
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges persisted and live items when processing", async () => {
+    const { buildAuthoritativeTranscript } = await import("../../src/transcript.js");
+    const { createEmptyLiveTurnBuffer } = await import("../../src/room-state.js");
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _createEmptyLiveTurnBuffer = createEmptyLiveTurnBuffer;
+
+    // Create a temp session file with prior conversation
+    const fs = await import("fs/promises");
+    const tmpDir = await fs.mkdtemp("/tmp/test-");
+    const sessionFile = `${tmpDir}/test.jsonl`;
+
+    const sessionContent = [
+      JSON.stringify({ type: "session", id: "test-session" }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-001",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Previous question" }] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-002",
+        timestamp: "2024-01-01T00:00:01.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "Previous answer" }] },
+      }),
+    ].join("\n");
+
+    await fs.writeFile(sessionFile, sessionContent);
+
+    try {
+      // Create a live turn buffer with current in-flight turn
+      const liveBuffer: LiveTurnBuffer = {
+        ...createEmptyLiveTurnBuffer(),
+        isActive: true,
+        turnId: "turn-live",
+        turnStartedAt: "2024-01-01T00:00:10.000Z",
+        userPrompt: "Current prompt",
+        userMessageTimestamp: "2024-01-01T00:00:10.100Z",
+        assistantText: "Processing...",
+        assistantMessageTimestamp: "2024-01-01T00:00:11.000Z",
+        thinkingText: "",
+        items: [
+          {
+            kind: "user_message",
+            id: "live-user-turn-live",
+            timestamp: "2024-01-01T00:00:10.100Z",
+            text: "Current prompt",
+          },
+          {
+            kind: "assistant_message",
+            id: "live-assistant-turn-live",
+            timestamp: "2024-01-01T00:00:11.000Z",
+            text: "Processing...",
+          },
+        ],
+        toolStarts: [],
+        toolEnds: [],
+      };
+
+      const items = await buildAuthoritativeTranscript(
+        "test-session",
+        sessionFile,
+        liveBuffer,
+        true, // isProcessing
+        { baseDir: tmpDir },
+      );
+
+      // Should have prior conversation + current live turn (with deduplication)
+      expect(items).toHaveLength(4); // prev user, prev assistant, live user, live assistant
+      expect(items[0].kind).toBe("user_message");
+      expect(items[0].text).toBe("Previous question");
+      expect(items[1].kind).toBe("assistant_message");
+      expect(items[1].text).toBe("Previous answer");
+      expect(items[2].kind).toBe("user_message");
+      expect(items[2].text).toBe("Current prompt");
+      expect(items[3].kind).toBe("assistant_message");
+      expect(items[3].text).toBe("Processing...");
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles live items with tool_start and tool_end", async () => {
+    const { buildAuthoritativeTranscript } = await import("../../src/transcript.js");
+    const { createEmptyLiveTurnBuffer } = await import("../../src/room-state.js");
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _createEmptyLiveTurnBuffer = createEmptyLiveTurnBuffer;
+
+    const fs = await import("fs/promises");
+    const tmpDir = await fs.mkdtemp("/tmp/test-");
+    const sessionFile = `${tmpDir}/test.jsonl`;
+
+    const sessionContent = [
+      JSON.stringify({ type: "session", id: "test-session" }),
+      JSON.stringify({
+        type: "message",
+        id: "msg-001",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Hello" }] },
+      }),
+    ].join("\n");
+
+    await fs.writeFile(sessionFile, sessionContent);
+
+    try {
+      const liveBuffer: LiveTurnBuffer = {
+        ...createEmptyLiveTurnBuffer(),
+        isActive: true,
+        turnId: "turn-tools",
+        turnStartedAt: "2024-01-01T00:00:10.000Z",
+        userPrompt: "Run ls",
+        userMessageTimestamp: "2024-01-01T00:00:10.100Z",
+        assistantText: "Sure",
+        assistantMessageTimestamp: "2024-01-01T00:00:11.000Z",
+        thinkingText: "",
+        items: [
+          {
+            kind: "user_message",
+            id: "live-user-turn-tools",
+            timestamp: "2024-01-01T00:00:10.100Z",
+            text: "Run ls",
+          },
+          {
+            kind: "assistant_message",
+            id: "live-assistant-turn-tools",
+            timestamp: "2024-01-01T00:00:11.000Z",
+            text: "Sure",
+          },
+          {
+            kind: "tool_start",
+            id: "tool-start-tc1",
+            timestamp: "2024-01-01T00:00:12.000Z",
+            toolName: "bash",
+            toolCallId: "tc1",
+            arguments: '{"command": "ls"}',
+          },
+          {
+            kind: "tool_end",
+            id: "tool-end-tc1",
+            timestamp: "2024-01-01T00:00:13.000Z",
+            toolName: "bash",
+            toolCallId: "tc1",
+            success: true,
+            result: "file1.txt\nfile2.txt",
+          },
+        ],
+        toolStarts: [],
+        toolEnds: [],
+      };
+
+      const items = await buildAuthoritativeTranscript("test-session", sessionFile, liveBuffer, true, {
+        baseDir: tmpDir,
+      });
+
+      // Should have persisted + live items including tools
+      // 1 persisted user + 4 live items (user, assistant, tool_start, tool_end) = 5 total
+      expect(items).toHaveLength(5);
+      expect(items[0].kind).toBe("user_message");
+      expect(items[0].text).toBe("Hello");
+      expect(items[3].kind).toBe("tool_start");
+      expect(items[3].toolName).toBe("bash");
+      expect(items[4].kind).toBe("tool_end");
+      expect(items[4].success).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("Live transcript route - Merged output ordering", () => {
   it("returns merged persisted + live items in correct order during processing", () => {
     // Simulate persisted items from prior conversation

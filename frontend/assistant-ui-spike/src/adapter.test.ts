@@ -792,6 +792,278 @@ describe('Pending Message Cleanup', () => {
   });
 });
 
+describe('Transcript Snapshot Rehydration', () => {
+  const baseState: AdapterState = {
+    roomKey: 'test-room',
+    sessionId: 'session-001',
+    messages: [],
+    isProcessing: false,
+    activeToolCalls: new Map(),
+  };
+
+  it('rehydrates state from transcript_snapshot event', () => {
+    const snapshotEvent: WebUIEvent = {
+      type: 'transcript_snapshot',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      isProcessing: false,
+      generatedAt: '2024-01-01T00:00:00.000Z',
+      items: [
+        {
+          kind: 'user_message',
+          id: 'u1',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          text: 'Hello',
+        },
+        {
+          kind: 'assistant_message',
+          id: 'a1',
+          timestamp: '2024-01-01T00:00:01.000Z',
+          text: 'Hi there!',
+        },
+      ],
+    };
+
+    const newState = processEvent(baseState, snapshotEvent);
+
+    // Verify messages were rehydrated
+    expect(newState.messages).toHaveLength(2);
+    expect(newState.messages[0].role).toBe('user');
+    expect((newState.messages[0].content[0] as any).text).toBe('Hello');
+    expect(newState.messages[1].role).toBe('assistant');
+    expect((newState.messages[1].content[0] as any).text).toBe('Hi there!');
+
+    // Verify session ID was updated
+    expect(newState.sessionId).toBe('session-001');
+
+    // Verify streaming state was cleared
+    expect(newState.currentAssistantMessageId).toBeUndefined();
+    expect(newState.currentTurnId).toBeUndefined();
+  });
+
+  it('snapshot includes isProcessing state', () => {
+    const snapshotEvent: WebUIEvent = {
+      type: 'transcript_snapshot',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      isProcessing: true,
+      generatedAt: '2024-01-01T00:00:00.000Z',
+      items: [
+        {
+          kind: 'user_message',
+          id: 'u1',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          text: 'Current prompt',
+        },
+      ],
+    };
+
+    const newState = processEvent(baseState, snapshotEvent);
+
+    expect(newState.isProcessing).toBe(true);
+  });
+
+  it('snapshot includes tool_start and tool_end items', () => {
+    const snapshotEvent: WebUIEvent = {
+      type: 'transcript_snapshot',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      isProcessing: true,
+      generatedAt: '2024-01-01T00:00:00.000Z',
+      items: [
+        {
+          kind: 'user_message',
+          id: 'u1',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          text: 'Run ls',
+        },
+        {
+          kind: 'tool_start',
+          id: 't1',
+          timestamp: '2024-01-01T00:00:01.000Z',
+          toolName: 'bash',
+          toolCallId: 'call-001',
+          arguments: '{"command": "ls"}',
+        },
+        {
+          kind: 'tool_end',
+          id: 't2',
+          timestamp: '2024-01-01T00:00:02.000Z',
+          toolName: 'bash',
+          toolCallId: 'call-001',
+          success: true,
+          result: 'file1.txt\nfile2.txt',
+        },
+      ],
+    };
+
+    const newState = processEvent(baseState, snapshotEvent);
+
+    expect(newState.messages).toHaveLength(3);
+    expect(newState.messages[1].role).toBe('tool');
+    expect((newState.messages[1] as any).toolName).toBe('bash');
+    expect((newState.messages[1] as any).toolArguments).toBe('{"command": "ls"}');
+    expect(newState.messages[2].role).toBe('tool');
+    expect((newState.messages[2] as any).toolResult).toBe('file1.txt\nfile2.txt');
+    expect((newState.messages[2] as any).toolSuccess).toBe(true);
+  });
+
+  it('snapshot includes thinking items', () => {
+    const snapshotEvent: WebUIEvent = {
+      type: 'transcript_snapshot',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      isProcessing: true,
+      generatedAt: '2024-01-01T00:00:00.000Z',
+      items: [
+        {
+          kind: 'user_message',
+          id: 'u1',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          text: 'Analyze this',
+        },
+        {
+          kind: 'thinking',
+          id: 'th1',
+          timestamp: '2024-01-01T00:00:01.000Z',
+          text: 'Let me think through this step by step...',
+        },
+        {
+          kind: 'assistant_message',
+          id: 'a1',
+          timestamp: '2024-01-01T00:00:02.000Z',
+          text: 'The answer is 42.',
+        },
+      ],
+    };
+
+    const newState = processEvent(baseState, snapshotEvent);
+
+    expect(newState.messages).toHaveLength(3);
+    // Thinking item creates assistant message with thinking content
+    expect(newState.messages[1].role).toBe('assistant');
+    expect(newState.messages[1].thinking).toBe('Let me think through this step by step...');
+    expect(newState.messages[2].role).toBe('assistant');
+    expect((newState.messages[2].content[0] as any).text).toBe('The answer is 42.');
+  });
+
+  it('live delta events continue working after snapshot', () => {
+    // Start with a snapshot
+    let state: AdapterState = {
+      ...baseState,
+      messages: [
+        {
+          id: 'u1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: true,
+    };
+
+    // Apply a live text_delta event
+    const deltaEvent: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'text_delta', delta: 'Hi there!' },
+    };
+
+    const newState = processEvent(state, deltaEvent);
+
+    expect(newState.messages).toHaveLength(2);
+    expect(newState.messages[1].role).toBe('assistant');
+    expect((newState.messages[1].content[0] as any).text).toBe('Hi there!');
+  });
+
+  it('snapshot followed by live delta does not duplicate messages', () => {
+    // Snapshot with user + partial assistant response
+    let state: AdapterState = {
+      ...baseState,
+      messages: [
+        {
+          id: 'u1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Hello' }],
+          createdAt: new Date(),
+        },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hi' }],
+          createdAt: new Date(),
+        },
+      ],
+      isProcessing: true,
+    };
+
+    // Live delta continues the assistant response
+    const deltaEvent: WebUIEvent = {
+      type: 'message_update',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      turnId: 'turn-001',
+      sessionId: 'session-001',
+      role: 'assistant',
+      content: { type: 'text_delta', delta: ' there!' },
+    };
+
+    const newState = processEvent(state, deltaEvent);
+
+    // Should still have only 2 messages, with appended content
+    expect(newState.messages).toHaveLength(2);
+    expect((newState.messages[1].content[0] as any).text).toBe('Hi there!');
+  });
+
+  it('snapshot is idempotent - applying same snapshot twice produces same result', () => {
+    const snapshotEvent: WebUIEvent = {
+      type: 'transcript_snapshot',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      roomId: '!room:example.com',
+      roomKey: 'test-room',
+      sessionId: 'session-001',
+      isProcessing: false,
+      generatedAt: '2024-01-01T00:00:00.000Z',
+      items: [
+        {
+          kind: 'user_message',
+          id: 'u1',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          text: 'Hello',
+        },
+        {
+          kind: 'assistant_message',
+          id: 'a1',
+          timestamp: '2024-01-01T00:00:01.000Z',
+          text: 'Hi there!',
+        },
+      ],
+    };
+
+    const state1 = processEvent(baseState, snapshotEvent);
+    const state2 = processEvent(state1, snapshotEvent);
+
+    // Both should have same message count and content
+    expect(state2.messages).toHaveLength(2);
+    expect((state2.messages[0].content[0] as any).text).toBe('Hello');
+    expect((state2.messages[1].content[0] as any).text).toBe('Hi there!');
+  });
+});
+
 describe('Repeated Identical Prompts', () => {
   it('allows repeated identical prompts in separate turns', () => {
     // First turn: optimistic update + turn_start

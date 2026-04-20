@@ -505,3 +505,73 @@ export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems
 
   return mergedItems;
 }
+
+/**
+ * Options for building an authoritative transcript snapshot.
+ */
+export interface BuildSnapshotOptions {
+  /** Base directory for resolving relative paths */
+  baseDir: string;
+  /** Whether to include thinking content */
+  includeThinking?: boolean;
+}
+
+/**
+ * Build the authoritative transcript snapshot for a room.
+ * This is used for both the HTTP transcript endpoint and SSE connect-time snapshot.
+ *
+ * When room is processing: returns persisted items + live current-turn items merged together.
+ * When room is not processing: returns persisted items only.
+ *
+ * @param sessionId The session ID
+ * @param sessionFile Path to the session file (if exists)
+ * @param liveTurnBuffer The live turn buffer for in-flight content (if processing)
+ * @param isProcessing Whether the room is currently processing
+ * @param options Build options
+ * @returns The merged transcript items
+ */
+export async function buildAuthoritativeTranscript(
+  sessionId: string,
+  sessionFile: string | undefined,
+  liveTurnBuffer: LiveTurnBufferForTranscript | undefined,
+  isProcessing: boolean,
+  options: BuildSnapshotOptions,
+): Promise<TranscriptItem[]> {
+  let persistedItems: TranscriptItem[] = [];
+  let liveItems: TranscriptItem[] = [];
+
+  // Case 1: Room is processing - return persisted + live items
+  if (isProcessing) {
+    // Get persisted transcript from session file (if exists)
+    if (sessionFile) {
+      try {
+        const persistedTranscript = await buildLiveTranscript(sessionId, sessionFile, {
+          baseDir: options.baseDir,
+          includeThinking: options.includeThinking,
+        });
+        persistedItems = persistedTranscript.items;
+      } catch (err) {
+        console.warn(`Warning: Could not read persisted transcript for session ${sessionId}:`, err);
+        // Continue with empty persisted items
+      }
+    }
+
+    // Get live current-turn items from the buffer
+    liveItems = liveTurnBufferToTranscriptItems(liveTurnBuffer);
+
+    // Merge persisted and live items with deduplication
+    return mergeTranscriptItems(persistedItems, liveItems);
+  }
+
+  // Case 2: Room is not processing - return persisted transcript only
+  if (sessionFile) {
+    const transcript = await buildLiveTranscript(sessionId, sessionFile, {
+      baseDir: options.baseDir,
+      includeThinking: options.includeThinking,
+    });
+    return transcript.items;
+  }
+
+  // No session file and not processing - empty transcript
+  return [];
+}

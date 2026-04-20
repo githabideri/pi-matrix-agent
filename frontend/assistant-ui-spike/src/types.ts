@@ -130,6 +130,7 @@ export interface PromptResponse {
  */
 export type WebUIEvent =
   | SessionConnectedEvent
+  | TranscriptSnapshotEvent
   | TurnStartEvent
   | UserMessageEvent
   | MessageUpdateEvent
@@ -156,6 +157,89 @@ export interface SessionConnectedEvent extends EventMetadata {
   type: 'session_connected';
   sessionId?: string;
 }
+
+/**
+ * Transcript snapshot event - emitted immediately after session_connected.
+ * Contains a backend-authoritative snapshot of the room's current state.
+ */
+export interface TranscriptSnapshotEvent extends EventMetadata {
+  type: 'transcript_snapshot';
+  sessionId: string;
+  relativeSessionPath?: string;
+  isProcessing: boolean;
+  items: TranscriptSnapshotItem[];
+  generatedAt: string;
+}
+
+/**
+ * Transcript snapshot item types.
+ */
+export type TranscriptSnapshotItemKind = 'user_message' | 'assistant_message' | 'tool_start' | 'tool_end' | 'thinking';
+
+/**
+ * Base transcript snapshot item.
+ */
+export interface BaseTranscriptSnapshotItem {
+  kind: TranscriptSnapshotItemKind;
+  id: string;
+  timestamp: string;
+}
+
+/**
+ * User message snapshot item.
+ */
+export interface UserMessageSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: 'user_message';
+  text: string;
+}
+
+/**
+ * Assistant message snapshot item.
+ */
+export interface AssistantMessageSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: 'assistant_message';
+  text: string;
+  thinking?: string;
+}
+
+/**
+ * Tool start snapshot item.
+ */
+export interface ToolStartSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: 'tool_start';
+  toolName: string;
+  toolCallId?: string;
+  arguments?: string;
+}
+
+/**
+ * Tool end snapshot item.
+ */
+export interface ToolEndSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: 'tool_end';
+  toolName: string;
+  toolCallId?: string;
+  success: boolean;
+  result?: string;
+}
+
+/**
+ * Thinking snapshot item.
+ */
+export interface ThinkingSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: 'thinking';
+  text: string;
+}
+
+/**
+ * Union type for transcript snapshot items.
+ */
+export type TranscriptSnapshotItem =
+  | UserMessageSnapshotItem
+  | AssistantMessageSnapshotItem
+  | ToolStartSnapshotItem
+  | ToolEndSnapshotItem
+  | ThinkingSnapshotItem;
 
 /**
  * Turn start event.
@@ -266,4 +350,11 @@ export interface ErrorEvent extends EventMetadata {
   type: 'error';
   message: string;
   code?: string;
+}
+
+/**
+ * Helper to check if an event is a transcript snapshot.
+ */
+export function isTranscriptSnapshotEvent(event: WebUIEvent): event is TranscriptSnapshotEvent {
+  return event.type === 'transcript_snapshot';
 }

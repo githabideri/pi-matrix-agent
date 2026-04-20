@@ -53,6 +53,30 @@ export interface SessionConnectedEvent extends EventMetadata {
 }
 
 /**
+ * Emitted immediately after session_connected on SSE connect/reconnect.
+ * Contains a backend-authoritative snapshot of the room's current state.
+ * Includes both persisted transcript and any in-flight live-turn content.
+ */
+export interface TranscriptSnapshotEvent extends EventMetadata {
+  type: "transcript_snapshot";
+
+  /** Session ID */
+  sessionId: string;
+
+  /** Relative path to session file if available */
+  relativeSessionPath?: string;
+
+  /** Whether the room is currently processing a turn */
+  isProcessing: boolean;
+
+  /** Current transcript items (persisted + live in-flight) */
+  items: TranscriptSnapshotItem[];
+
+  /** When this snapshot was generated */
+  generatedAt: string;
+}
+
+/**
  * Emitted when a new turn begins (user prompt received).
  * Maps from legacy `run_start`.
  */
@@ -215,6 +239,9 @@ export interface StateChangeEvent extends EventMetadata {
 export interface ErrorEvent extends EventMetadata {
   type: "error";
 
+  /** Session ID */
+  sessionId?: string;
+
   /** Error message */
   message: string;
 
@@ -227,6 +254,7 @@ export interface ErrorEvent extends EventMetadata {
  */
 export type WebUIEvent =
   | SessionConnectedEvent
+  | TranscriptSnapshotEvent
   | TurnStartEvent
   | UserMessageEvent
   | MessageUpdateEvent
@@ -275,3 +303,80 @@ export function isTextDelta(event: WebUIEvent): event is MessageUpdateEvent {
 export function isThinkingDelta(event: WebUIEvent): event is MessageUpdateEvent {
   return event.type === "message_update" && event.content.type === "thinking_delta";
 }
+
+/**
+ * Check if an event is a transcript snapshot.
+ */
+export function isTranscriptSnapshot(event: WebUIEvent): event is TranscriptSnapshotEvent {
+  return event.type === "transcript_snapshot";
+}
+
+/**
+ * Transcript snapshot item types.
+ */
+export type TranscriptSnapshotItemKind = "user_message" | "assistant_message" | "tool_start" | "tool_end" | "thinking";
+
+/**
+ * Base transcript snapshot item.
+ */
+export interface BaseTranscriptSnapshotItem {
+  kind: TranscriptSnapshotItemKind;
+  id: string;
+  timestamp: string;
+}
+
+/**
+ * User message snapshot item.
+ */
+export interface UserMessageSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: "user_message";
+  text: string;
+}
+
+/**
+ * Assistant message snapshot item.
+ */
+export interface AssistantMessageSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: "assistant_message";
+  text: string;
+  thinking?: string;
+}
+
+/**
+ * Tool start snapshot item.
+ */
+export interface ToolStartSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: "tool_start";
+  toolName: string;
+  toolCallId?: string;
+  arguments?: string;
+}
+
+/**
+ * Tool end snapshot item.
+ */
+export interface ToolEndSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: "tool_end";
+  toolName: string;
+  toolCallId?: string;
+  success: boolean;
+  result?: string;
+}
+
+/**
+ * Thinking snapshot item.
+ */
+export interface ThinkingSnapshotItem extends BaseTranscriptSnapshotItem {
+  kind: "thinking";
+  text: string;
+}
+
+/**
+ * Union type for transcript snapshot items.
+ */
+export type TranscriptSnapshotItem =
+  | UserMessageSnapshotItem
+  | AssistantMessageSnapshotItem
+  | ToolStartSnapshotItem
+  | ToolEndSnapshotItem
+  | ThinkingSnapshotItem;

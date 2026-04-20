@@ -81,6 +81,25 @@ The `!control` command returns the Tailscale Serve URL for the current room, poi
 
 ## Known Limitations
 
+### SSE Transcript Snapshot (Milestone 3.0)
+
+When the WebUI connects to the SSE stream (`GET /api/live/rooms/:roomKey/events`), it receives an initial **transcript snapshot** immediately after the `session_connected` event. This provides a backend-authoritative snapshot of the room's current state, including:
+
+- Full persisted transcript
+- Any in-flight live-turn content (if processing)
+- Processing state
+- Session metadata
+
+**Event sequence on connect:**
+
+1. `session_connected` - SSE connection established
+2. `transcript_snapshot` - Initial state snapshot (new in 3.0)
+3. Ongoing live events (`turn_start`, `message_update`, etc.)
+
+**Use case:** Enables reload/reconnect mid-run to show current conversation state immediately, without waiting for new stream activity.
+
+**Note:** Replay cursor / Last-Event-ID protocol is future work.
+
 ### Control Plane During Inference
 
 The control server runs in the same Node.js process as the SDK. During active inference, **async operations may be blocked** because the SDK performs blocking I/O:

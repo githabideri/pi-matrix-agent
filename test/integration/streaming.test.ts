@@ -537,7 +537,7 @@ describe("Live transcript API - GET /api/live/rooms/:roomKey/transcript", () => 
     // Update the session file path
     const sessionFile = path.join(
       fixture.sessionBaseDir,
-      "room-" + roomKey,
+      `room-${roomKey}`,
       `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1)}_${sessionId}.jsonl`,
     );
     fs.mkdirSync(path.dirname(sessionFile), { recursive: true });

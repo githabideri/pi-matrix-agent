@@ -266,6 +266,39 @@ export function createStreamingMessage(
 }
 
 /**
+ * Convert a transcript snapshot item to an internal message.
+ */
+export function snapshotItemToMessage(item: TranscriptItem): InternalMessage {
+  return transcriptItemToMessage(item);
+}
+
+/**
+ * Rehydrate adapter state from a transcript snapshot.
+ * This replaces the current message list with the authoritative backend snapshot.
+ */
+export function rehydrateFromSnapshot(
+  state: AdapterState,
+  snapshot: {
+    sessionId: string;
+    isProcessing: boolean;
+    items: TranscriptItem[];
+  }
+): AdapterState {
+  // Convert snapshot items to internal messages
+  const messages = snapshot.items.map(snapshotItemToMessage);
+
+  return {
+    ...state,
+    sessionId: snapshot.sessionId,
+    messages,
+    isProcessing: snapshot.isProcessing,
+    // Clear streaming state - snapshot represents a point-in-time state
+    currentAssistantMessageId: undefined,
+    currentTurnId: undefined,
+  };
+}
+
+/**
  * Process a WebUI event and update the adapter state.
  */
 export function processEvent(
@@ -278,6 +311,15 @@ export function processEvent(
         ...state,
         sessionId: event.sessionId || state.sessionId,
       };
+
+    case 'transcript_snapshot': {
+      // Rehydrate from the backend-authoritative snapshot
+      return rehydrateFromSnapshot(state, {
+        sessionId: event.sessionId,
+        isProcessing: event.isProcessing,
+        items: event.items,
+      });
+    }
 
     case 'turn_start': {
       // Clear the current assistant message ID for the new turn

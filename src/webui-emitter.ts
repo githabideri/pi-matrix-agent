@@ -9,11 +9,14 @@
  * - Maintains turn state for proper event sequencing
  * - Can be attached to HTTP response streams for SSE
  * - Handles cleanup on disconnect
+ * - Emits an initial transcript snapshot on connect for rehydration
  */
 
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Response } from "express";
-import type { WebUIEvent } from "./webui-types.js";
+import type { LiveTurnBuffer } from "./room-state.js";
+import { buildLiveTranscript, liveTurnBufferToTranscriptItems, mergeTranscriptItems } from "./transcript.js";
+import type { TranscriptSnapshotItem, WebUIEvent } from "./webui-types.js";
 import { generateTurnId } from "./webui-types.js";
 
 export interface WebUIEmitterOptions {
@@ -25,12 +28,28 @@ export interface WebUIEmitterOptions {
 
   /** Current session ID */
   sessionId: string;
+
+  /** Session file path (if available) */
+  sessionFile?: string;
+
+  /** Base directory for resolving relative paths */
+  workingDirectory?: string;
+
+  /** Whether the room is currently processing */
+  isProcessing?: boolean;
+
+  /** Live turn buffer for in-flight content */
+  liveTurnBuffer?: LiveTurnBuffer;
 }
 
 export class WebUIEmitter {
   private roomId: string;
   private _roomKey: string;
   private sessionId: string;
+  private sessionFile?: string;
+  private workingDirectory?: string;
+  private isProcessing?: boolean;
+  private liveTurnBuffer?: LiveTurnBuffer;
 
   /** Public getter for roomKey (used by attachEmitterToSSE) */
   get roomKey(): string {
@@ -48,6 +67,10 @@ export class WebUIEmitter {
     this.roomId = options.roomId;
     this._roomKey = options.roomKey;
     this.sessionId = options.sessionId;
+    this.sessionFile = options.sessionFile;
+    this.workingDirectory = options.workingDirectory;
+    this.isProcessing = options.isProcessing ?? false;
+    this.liveTurnBuffer = options.liveTurnBuffer;
   }
 
   /**
@@ -65,8 +88,9 @@ export class WebUIEmitter {
 
   /**
    * Start emitting events from the session.
+   * Emits session_connected followed by transcript_snapshot for rehydration.
    */
-  start(session: AgentSession): void {
+  async start(session: AgentSession): Promise<void> {
     // Clear any previous state
     this.clearState();
 
@@ -83,6 +107,82 @@ export class WebUIEmitter {
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
     });
+
+    // Emit transcript snapshot for immediate rehydration
+    await this.emitTranscriptSnapshot();
+  }
+
+  /**
+   * Emit the initial transcript snapshot event.
+   * This provides a backend-authoritative snapshot of the room's current state.
+   */
+  private async emitTranscriptSnapshot(): Promise<void> {
+    try {
+      // Build the authoritative transcript items
+      let items: TranscriptSnapshotItem[] = [];
+
+      if (this.isProcessing && this.liveTurnBuffer) {
+        // Room is processing: merge persisted + live items
+        let persistedItems: TranscriptSnapshotItem[] = [];
+
+        if (this.sessionFile && this.workingDirectory) {
+          try {
+            const persistedTranscript = await buildLiveTranscript(this.sessionId, this.sessionFile, {
+              baseDir: this.workingDirectory,
+            });
+            persistedItems = persistedTranscript.items as TranscriptSnapshotItem[];
+          } catch (err) {
+            console.warn(`[WebUIEmitter] Could not read persisted transcript:`, err);
+          }
+        }
+
+        // Get live items from buffer
+        const liveItems = liveTurnBufferToTranscriptItems(this.liveTurnBuffer) as TranscriptSnapshotItem[];
+
+        // Merge with deduplication
+        items = mergeTranscriptItems(persistedItems as any, liveItems as any) as TranscriptSnapshotItem[];
+      } else if (this.sessionFile && this.workingDirectory) {
+        // Room not processing: use persisted transcript only
+        const transcript = await buildLiveTranscript(this.sessionId, this.sessionFile, {
+          baseDir: this.workingDirectory,
+        });
+        items = transcript.items as TranscriptSnapshotItem[];
+      }
+
+      // Build relative session path
+      let relativeSessionPath: string | undefined;
+      if (this.sessionFile && this.workingDirectory) {
+        relativeSessionPath = this.sessionFile.replace(this.workingDirectory, "");
+        if (relativeSessionPath.startsWith("/")) {
+          relativeSessionPath = relativeSessionPath.slice(1);
+        }
+      }
+
+      // Emit the snapshot event
+      this.emit({
+        type: "transcript_snapshot",
+        roomId: this.roomId,
+        roomKey: this._roomKey,
+        sessionId: this.sessionId,
+        relativeSessionPath,
+        isProcessing: this.isProcessing ?? false,
+        items,
+        generatedAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(`[WebUIEmitter] Error generating transcript snapshot:`, error);
+      // Don't crash the SSE connection - emit an error event instead
+      this.emit({
+        type: "error",
+        roomId: this.roomId,
+        roomKey: this._roomKey,
+        sessionId: this.sessionId,
+        message: "Failed to generate transcript snapshot",
+        code: "SNAPSHOT_ERROR",
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   /**

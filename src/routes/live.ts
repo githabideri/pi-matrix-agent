@@ -333,18 +333,25 @@ export function routeLive(
       }
     }
 
-    // Create WebUI emitter for this room
+    // Get live turn buffer for snapshot generation
+    const liveTurnBuffer = piBackend.getRoomStateManager().getLiveTurnBuffer(roomState!.roomId);
+
+    // Create WebUI emitter for this room with snapshot context
     const emitter = new WebUIEmitter({
       roomId: roomState!.roomId,
       roomKey: roomKey,
       sessionId: roomState!.sessionId || "",
+      sessionFile: roomState!.sessionFile,
+      workingDirectory: workingDirectory,
+      isProcessing: roomState!.isProcessing,
+      liveTurnBuffer,
     });
 
     // Attach emitter to SSE response
     const cleanup = attachEmitterToSSE(res, emitter);
 
-    // Start emitting events
-    emitter.start(roomState!.session);
+    // Start emitting events (includes initial snapshot)
+    await emitter.start(roomState!.session);
 
     // Cleanup on client disconnect
     req.on("close", () => {
