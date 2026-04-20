@@ -4,7 +4,7 @@
  * Tests for the transcript-to-message conversion and SSE event processing.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   transcriptItemToMessage,
   transcriptToMessages,
@@ -2932,3 +2932,103 @@ export {};
 
 
 
+
+// =============================================================================
+// State Change Event Tests
+// =============================================================================
+
+describe('state_change event', () => {
+  let baseState: AdapterState;
+
+  beforeEach(() => {
+    baseState = {
+      roomKey: 'room-123',
+      sessionId: 'session-456',
+      messages: [],
+      isProcessing: false,
+      activeToolCalls: new Map(),
+    };
+  });
+
+  it('sets isProcessing to true on processing_start', () => {
+    const event: WebUIEvent = {
+      type: 'state_change',
+      roomId: '!room:server',
+      roomKey: 'room-123',
+      sessionId: 'session-456',
+      changeType: 'processing_start',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+
+    const newState = processEvent(baseState, event);
+
+    expect(newState.isProcessing).toBe(true);
+    expect(newState.messages).toBe(baseState.messages);
+  });
+
+  it('sets isProcessing to false on processing_end', () => {
+    const event: WebUIEvent = {
+      type: 'state_change',
+      roomId: '!room:server',
+      roomKey: 'room-123',
+      sessionId: 'session-456',
+      changeType: 'processing_end',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+
+    const newState = processEvent({ ...baseState, isProcessing: true }, event);
+
+    expect(newState.isProcessing).toBe(false);
+    expect(newState.messages).toBe(baseState.messages);
+  });
+
+  it('preserves other state on processing_end', () => {
+    const messages: InternalMessage[] = [
+      {
+        id: 'msg-001',
+        role: 'user',
+        content: [{ type: 'text', text: 'Hello' }],
+        createdAt: new Date(),
+      },
+    ];
+    const state: AdapterState = {
+      ...baseState,
+      messages,
+      isProcessing: true,
+      activeToolCalls: new Map([['tool-1', { toolName: 'test' }]]),
+    };
+
+    const event: WebUIEvent = {
+      type: 'state_change',
+      roomId: '!room:server',
+      roomKey: 'room-123',
+      sessionId: 'session-456',
+      changeType: 'processing_end',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+
+    const newState = processEvent(state, event);
+
+    expect(newState.isProcessing).toBe(false);
+    expect(newState.messages).toBe(state.messages);
+    expect(newState.activeToolCalls).toBe(state.activeToolCalls);
+    expect(newState.sessionId).toBe(state.sessionId);
+  });
+
+  it('ignores unknown changeType', () => {
+    const event: WebUIEvent = {
+      type: 'state_change',
+      roomId: '!room:server',
+      roomKey: 'room-123',
+      sessionId: 'session-456',
+      // @ts-expect-error - testing unknown type
+      changeType: 'unknown_type',
+      timestamp: '2024-01-01T00:00:00.000Z',
+    };
+
+    const state: AdapterState = { ...baseState, isProcessing: true };
+    const newState = processEvent(state, event);
+
+    expect(newState.isProcessing).toBe(true); // unchanged
+  });
+});

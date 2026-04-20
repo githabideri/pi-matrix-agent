@@ -31,6 +31,12 @@ export function Composer({ isProcessing, onSend, onInterrupt }: ComposerProps) {
   };
   
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isProcessing && e.key === 'Escape') {
+      // Escape interrupts when processing is active
+      e.preventDefault();
+      handleInterrupt();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();

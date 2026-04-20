@@ -4,6 +4,7 @@ import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
 import { buildAuthoritativeTranscript } from "../transcript.js";
 import type { AcceptedPromptResponse, ContextResponse, LiveRoomDetail, LiveRoomListItem } from "../types.js";
+import { broadcasterManager } from "../webui-broadcaster.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
 
 export function routeLive(
@@ -293,6 +294,18 @@ export function routeLive(
 
     try {
       await piBackend.interrupt(roomId);
+
+      // Emit state_change event to notify all connected SSE clients
+      const broadcaster = broadcasterManager.get(roomKey);
+      broadcaster.emit({
+        type: "state_change",
+        roomId,
+        roomKey,
+        sessionId: roomState.sessionId || "",
+        changeType: "processing_end",
+        timestamp: new Date().toISOString(),
+      });
+
       res.json({ success: true, message: "Interrupt successful", roomKey });
     } catch (error: any) {
       console.error(`[INTERRUPT] Error interrupting room ${roomKey}:`, error);
@@ -354,10 +367,21 @@ export function routeLive(
     // Start emitting events (includes initial snapshot)
     await emitter.start(roomState!.session);
 
+    // Subscribe to broadcaster for room-specific events (e.g., interrupt completion)
+    const broadcaster = broadcasterManager.get(roomKey);
+    const broadcastCleanup = broadcaster.onEvent((event) => {
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch (err) {
+        console.error(`[SSE] Error writing broadcast event:`, err);
+      }
+    });
+
     // Cleanup on client disconnect
     req.on("close", () => {
       console.log(`[SSE] Client disconnected for room ${roomKey}`);
       cleanup();
+      broadcastCleanup();
     });
   });
 
