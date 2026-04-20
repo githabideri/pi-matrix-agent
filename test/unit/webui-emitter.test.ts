@@ -300,6 +300,37 @@ describe("WebUIEmitter", () => {
   });
 });
 
+describe("buildAuthoritativeTranscript - Single Source of Truth", () => {
+  it("transcript route and emitter both use buildAuthoritativeTranscript (code inspection)", async () => {
+    // Read the source files and verify they import and use buildAuthoritativeTranscript
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const fileUrl = await import("url");
+
+    // Get the absolute path to source files
+    const srcDir = path.dirname(fileUrl.fileURLToPath(import.meta.url));
+    const liveRoutePath = path.join(srcDir, "..", "..", "src", "routes", "live.ts");
+    const emitterPath = path.join(srcDir, "..", "..", "src", "webui-emitter.ts");
+
+    // Check routes/live.ts
+    const liveRouteContent = await fs.readFile(liveRoutePath, "utf-8");
+    expect(liveRouteContent).toContain("buildAuthoritativeTranscript");
+    expect(liveRouteContent).toContain("await buildAuthoritativeTranscript(");
+
+    // Check webui-emitter.ts
+    const emitterContent = await fs.readFile(emitterPath, "utf-8");
+    expect(emitterContent).toContain("buildAuthoritativeTranscript");
+    expect(emitterContent).toContain("await buildAuthoritativeTranscript(");
+
+    // Verify old manual merge logic is NOT present in routes/live.ts transcript endpoint
+    // (should not have both buildLiveTranscript AND liveTurnBufferToTranscriptItems AND mergeTranscriptItems together)
+    const hasOldLiveImport =
+      liveRouteContent.includes("liveTurnBufferToTranscriptItems") && liveRouteContent.includes("mergeTranscriptItems");
+    // The import should only be for buildAuthoritativeTranscript now
+    expect(hasOldLiveImport).toBe(false);
+  });
+});
+
 describe("WebUIEmitter - Transcript Snapshot", () => {
   let emitter: WebUIEmitter;
   let mockSession: Partial<AgentSession>;

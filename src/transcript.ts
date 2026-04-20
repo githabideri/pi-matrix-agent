@@ -510,8 +510,8 @@ export function mergeTranscriptItems(persistedItems: TranscriptItem[], liveItems
  * Options for building an authoritative transcript snapshot.
  */
 export interface BuildSnapshotOptions {
-  /** Base directory for resolving relative paths */
-  baseDir: string;
+  /** Base directory for resolving relative paths (optional) */
+  baseDir?: string;
   /** Whether to include thinking content */
   includeThinking?: boolean;
 }
@@ -543,7 +543,7 @@ export async function buildAuthoritativeTranscript(
   // Case 1: Room is processing - return persisted + live items
   if (isProcessing) {
     // Get persisted transcript from session file (if exists)
-    if (sessionFile) {
+    if (sessionFile && options.baseDir) {
       try {
         const persistedTranscript = await buildLiveTranscript(sessionId, sessionFile, {
           baseDir: options.baseDir,
@@ -564,7 +564,7 @@ export async function buildAuthoritativeTranscript(
   }
 
   // Case 2: Room is not processing - return persisted transcript only
-  if (sessionFile) {
+  if (sessionFile && options.baseDir) {
     const transcript = await buildLiveTranscript(sessionId, sessionFile, {
       baseDir: options.baseDir,
       includeThinking: options.includeThinking,

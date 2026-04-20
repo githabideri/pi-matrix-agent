@@ -60,6 +60,9 @@ export interface AdapterState {
   currentAssistantMessageId?: string;
   // Current turn ID for detecting turn boundaries
   currentTurnId?: string;
+  // Tail-aware continuation state set by snapshot rehydration
+  // Tracks the kind of the last item in the snapshot to derive correct continuation behavior
+  snapshotTailKind?: 'user_message' | 'assistant_message' | 'tool_start' | 'tool_end' | 'thinking';
 }
 
 /**
@@ -275,6 +278,12 @@ export function snapshotItemToMessage(item: TranscriptItem): InternalMessage {
 /**
  * Rehydrate adapter state from a transcript snapshot.
  * This replaces the current message list with the authoritative backend snapshot.
+ *
+ * Implements tail-aware continuation:
+ * - If snapshot ends with assistant_message: set currentAssistantMessageId for continuation
+ * - If snapshot ends with thinking: set currentAssistantMessageId for thinking continuation
+ * - If snapshot ends with tool_start/tool_end: clear currentAssistantMessageId (new assistant needed)
+ * - If snapshot ends with user_message: clear currentAssistantMessageId (new assistant needed)
  */
 export function rehydrateFromSnapshot(
   state: AdapterState,
@@ -287,14 +296,64 @@ export function rehydrateFromSnapshot(
   // Convert snapshot items to internal messages
   const messages = snapshot.items.map(snapshotItemToMessage);
 
+  // Derive continuation state from the tail of the snapshot
+  const lastItem = snapshot.items[snapshot.items.length - 1];
+  let currentAssistantMessageId: string | undefined = undefined;
+  let snapshotTailKind: AdapterState['snapshotTailKind'] = undefined;
+
+  if (lastItem) {
+    switch (lastItem.kind) {
+      case 'assistant_message':
+        // Rule A: snapshot ends with assistant_message → continue that message
+        snapshotTailKind = 'assistant_message';
+        {
+          const assistantMsg = messages.find(m => m.role === 'assistant' && 
+            typeof m.content !== 'string' && m.content.length > 0 &&
+            m.content.some(c => c.type === 'text' && typeof c.text === 'string'));
+          if (assistantMsg) {
+            currentAssistantMessageId = assistantMsg.id;
+          }
+        }
+        break;
+
+      case 'thinking':
+        // Rule B: snapshot ends with thinking → continue the thinking segment
+        snapshotTailKind = 'thinking';
+        {
+          // Find the assistant message with thinking content at the end
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && messages[i].thinking) {
+              currentAssistantMessageId = messages[i].id;
+              break;
+            }
+          }
+        }
+        break;
+
+      case 'tool_start':
+      case 'tool_end':
+        // Rule C: snapshot ends with tool activity → next assistant delta creates NEW message
+        snapshotTailKind = lastItem.kind;
+        currentAssistantMessageId = undefined;
+        break;
+
+      case 'user_message':
+        // Rule D: snapshot ends with user_message → next assistant delta creates NEW message
+        snapshotTailKind = 'user_message';
+        currentAssistantMessageId = undefined;
+        break;
+    }
+  }
+
   return {
     ...state,
     sessionId: snapshot.sessionId,
     messages,
     isProcessing: snapshot.isProcessing,
-    // Clear streaming state - snapshot represents a point-in-time state
-    currentAssistantMessageId: undefined,
+    // Set continuation state based on snapshot tail
+    currentAssistantMessageId,
     currentTurnId: undefined,
+    snapshotTailKind,
   };
 }
 
@@ -428,9 +487,14 @@ export function processEvent(
         ? state.messages.find(m => m.id === targetMessageId)
         : null;
       
-      // Only fall back to findLastMessageByRole if NOT a new turn AND NOT first update for turn
-      // This prevents appending to old assistant messages from previous turns
-      if (!targetMessage && !isNewTurn && !isFirstUpdateForTurn) {
+      // FALLBACK RULE:
+      // After snapshot rehydration, we MUST NOT fall back to findLastMessageByRole('assistant')
+      // because that can jump across tool boundaries and corrupt segment ordering.
+      // The snapshot tail-aware continuation already set currentAssistantMessageId correctly.
+      // Only allow fallback for legacy non-snapshot paths, and even then, only if:
+      // - NOT a new turn AND NOT first update for turn AND no snapshot tail kind set
+      if (!targetMessage && !isNewTurn && !isFirstUpdateForTurn && !state.snapshotTailKind) {
+        // Legacy fallback: only for pre-snapshot scenarios
         targetMessage = findLastMessageByRole(state.messages, 'assistant');
       }
       
@@ -450,6 +514,7 @@ export function processEvent(
             ...state,
             currentAssistantMessageId: assistantMessage.id,
             currentTurnId: event.turnId,  // Update turn ID
+            snapshotTailKind: undefined,  // Clear snapshot tail kind after first live delta
             messages: [...state.messages, assistantMessage],
           };
         }
@@ -476,6 +541,7 @@ export function processEvent(
           ...state,
           currentAssistantMessageId: assistantMessage.id,
           currentTurnId: event.turnId,  // Update turn ID
+          snapshotTailKind: undefined,  // Clear snapshot tail kind after first live delta
           messages: [...state.messages, assistantMessage],
         };
       }

@@ -2,12 +2,7 @@ import { type Request, type Response, Router } from "express";
 import type { MatrixTransport } from "../matrix.js";
 import type { PiSessionBackend } from "../pi-backend.js";
 import { getRelativeSessionPath } from "../room-state.js";
-import {
-  buildLiveTranscript,
-  liveTurnBufferToTranscriptItems,
-  mergeTranscriptItems,
-  type TranscriptItem,
-} from "../transcript.js";
+import { buildAuthoritativeTranscript } from "../transcript.js";
 import type { AcceptedPromptResponse, ContextResponse, LiveRoomDetail, LiveRoomListItem } from "../types.js";
 import { attachEmitterToSSE, WebUIEmitter } from "../webui-emitter.js";
 
@@ -148,55 +143,29 @@ export function routeLive(
     }
 
     try {
-      let persistedItems: TranscriptItem[] = [];
-      let liveItems: TranscriptItem[] = [];
+      // Get live turn buffer for in-flight content
+      const liveTurnBuffer = piBackend.getRoomStateManager().getLiveTurnBuffer(roomState.roomId);
 
-      // Case 1: Room is processing - return persisted + live items
-      if (roomState.isProcessing) {
-        // Get persisted transcript from session file (if exists)
-        if (roomState.sessionFile) {
-          try {
-            const persistedTranscript = await buildLiveTranscript(roomState.sessionId || "", roomState.sessionFile, {
-              baseDir: workingDirectory,
-            });
-            persistedItems = persistedTranscript.items;
-          } catch (err) {
-            console.warn(`Warning: Could not read persisted transcript for ${roomKey}:`, err);
-            // Continue with empty persisted items
-          }
-        }
+      // Use the canonical builder for authoritative transcript
+      const items = await buildAuthoritativeTranscript(
+        roomState.sessionId || "",
+        roomState.sessionFile,
+        liveTurnBuffer,
+        roomState.isProcessing,
+        { baseDir: workingDirectory },
+      );
 
-        // Get live current-turn items from the buffer
-        const liveTurnBuffer = piBackend.getRoomStateManager().getLiveTurnBuffer(roomState.roomId);
-        liveItems = liveTurnBufferToTranscriptItems(liveTurnBuffer);
-
-        // Merge persisted and live items with deduplication
-        const mergedItems = mergeTranscriptItems(persistedItems, liveItems);
-
-        return res.json({
-          roomId: roomState.roomId,
-          roomKey: roomKey,
-          sessionId: roomState.sessionId,
-          sessionFile: roomState.sessionFile,
-          relativeSessionPath: roomState.sessionFile
-            ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
-            : undefined,
-          items: mergedItems,
-          isProcessing: true,
-        });
-      }
-
-      // Case 2: Room is not processing - return persisted transcript only
-      const transcript = await buildLiveTranscript(roomState.sessionId || "", roomState.sessionFile, {
-        baseDir: workingDirectory,
+      res.json({
+        roomId: roomState.roomId,
+        roomKey: roomKey,
+        sessionId: roomState.sessionId,
+        sessionFile: roomState.sessionFile,
+        relativeSessionPath: roomState.sessionFile
+          ? getRelativeSessionPath(roomState.sessionFile, workingDirectory)
+          : undefined,
+        items,
+        isProcessing: roomState.isProcessing,
       });
-
-      // Add room context
-      transcript.roomId = roomState.roomId;
-      transcript.roomKey = roomKey;
-      transcript.sessionFile = roomState.sessionFile;
-
-      res.json(transcript);
     } catch (error) {
       console.error(`Error getting transcript for ${roomKey}:`, error);
       res.status(500).json({ error: "Failed to get transcript" });

@@ -2012,6 +2012,588 @@ describe('currentAssistantMessageId State Tracking', () => {
   });
 });
 
+describe('Snapshot Continuation - Tail-Aware Rules', () => {
+  const baseState: AdapterState = {
+    roomKey: 'test-room',
+    sessionId: 'session-001',
+    messages: [],
+    isProcessing: false,
+    activeToolCalls: new Map(),
+  };
+
+  describe('Rule A: snapshot ends with assistant_message', () => {
+    it('rehydrates with currentAssistantMessageId set to the tail assistant message', () => {
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Hello',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Hi there!',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // Verify snapshotTailKind is set
+      expect(state.snapshotTailKind).toBe('assistant_message');
+      
+      // Verify currentAssistantMessageId is set to the assistant message
+      expect(state.currentAssistantMessageId).toBe('msg-assistant_message-a1');
+      
+      // Verify messages
+      expect(state.messages).toHaveLength(2);
+    });
+
+    it('next text_delta continues the tail assistant message', () => {
+      // Start with snapshot ending in assistant_message
+      let state: AdapterState = {
+        ...baseState,
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            content: [{ type: 'text', text: 'Hello' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 'a1',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Hi there!' }],
+            createdAt: new Date(),
+          },
+        ],
+        isProcessing: true,
+        currentAssistantMessageId: 'a1',
+        snapshotTailKind: 'assistant_message',
+      };
+
+      // Apply text_delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: ' How can I help?' },
+      };
+
+      const newState = processEvent(state, deltaEvent);
+
+      // Should still have 2 messages, with appended content
+      expect(newState.messages).toHaveLength(2);
+      expect((newState.messages[1].content as any[])[0]?.text).toBe('Hi there! How can I help?');
+      
+      // currentAssistantMessageId should still point to the same message
+      expect(newState.currentAssistantMessageId).toBe('a1');
+    });
+  });
+
+  describe('Rule B: snapshot ends with thinking', () => {
+    it('rehydrates with currentAssistantMessageId set to the thinking message', () => {
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Analyze this',
+          },
+          {
+            kind: 'thinking',
+            id: 'th1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Let me think through this...',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // Verify snapshotTailKind is set
+      expect(state.snapshotTailKind).toBe('thinking');
+      
+      // Verify currentAssistantMessageId is set to the thinking message
+      expect(state.currentAssistantMessageId).toBe('msg-thinking-th1');
+      
+      // Verify messages
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[1].thinking).toBe('Let me think through this...');
+    });
+
+    it('next thinking_delta continues the tail thinking segment', () => {
+      // Start with snapshot ending in thinking
+      let state: AdapterState = {
+        ...baseState,
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            content: [{ type: 'text', text: 'Analyze this' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 'th1',
+            role: 'assistant',
+            content: [],
+            thinking: 'Let me think through this...',
+            createdAt: new Date(),
+          },
+        ],
+        isProcessing: true,
+        currentAssistantMessageId: 'th1',
+        snapshotTailKind: 'thinking',
+      };
+
+      // Apply thinking_delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'thinking_delta', delta: '\nStep by step analysis.' },
+      };
+
+      const newState = processEvent(state, deltaEvent);
+
+      // Should still have 2 messages, with appended thinking
+      expect(newState.messages).toHaveLength(2);
+      expect(newState.messages[1].thinking).toBe('Let me think through this...\nStep by step analysis.');
+    });
+  });
+
+  describe('Rule C: snapshot ends with tool_end', () => {
+    it('rehydrates with currentAssistantMessageId cleared (new assistant needed)', () => {
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Run ls',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Let me check',
+          },
+          {
+            kind: 'tool_start',
+            id: 't1',
+            timestamp: '2024-01-01T00:00:02.000Z',
+            toolName: 'bash',
+            toolCallId: 'call-001',
+            arguments: '{"command": "ls"}',
+          },
+          {
+            kind: 'tool_end',
+            id: 't2',
+            timestamp: '2024-01-01T00:00:03.000Z',
+            toolName: 'bash',
+            toolCallId: 'call-001',
+            success: true,
+            result: 'file1.txt\nfile2.txt',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // Verify snapshotTailKind is set
+      expect(state.snapshotTailKind).toBe('tool_end');
+      
+      // Verify currentAssistantMessageId is cleared (new assistant needed)
+      expect(state.currentAssistantMessageId).toBeUndefined();
+      
+      // Verify messages
+      expect(state.messages).toHaveLength(4);
+    });
+
+    it('next text_delta creates a NEW assistant message after tool_end (CRITICAL)', () => {
+      // Start with snapshot ending in tool_end
+      let state: AdapterState = {
+        ...baseState,
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            content: [{ type: 'text', text: 'Run ls' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 'a1',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Let me check' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 't1',
+            role: 'tool',
+            name: 'bash',
+            content: 'Tool Call: bash',
+            createdAt: new Date(),
+            toolCallId: 'call-001',
+            toolArguments: '{"command": "ls"}',
+          },
+          {
+            id: 't2',
+            role: 'tool',
+            name: 'bash',
+            content: 'Result: bash ✓',
+            createdAt: new Date(),
+            toolCallId: 'call-001',
+            toolResult: 'file1.txt\nfile2.txt',
+            toolSuccess: true,
+          },
+        ],
+        isProcessing: true,
+        currentAssistantMessageId: undefined,
+        snapshotTailKind: 'tool_end',
+      };
+
+      // Apply text_delta - THIS IS THE CRITICAL TEST
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:04.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: 'Here are the files:' },
+      };
+
+      const newState = processEvent(state, deltaEvent);
+
+      // CRITICAL: Should have 5 messages (NEW assistant message created)
+      // NOT 4 messages with content appended to "Let me check"
+      expect(newState.messages).toHaveLength(5);
+      
+      // Verify the old assistant message was NOT modified
+      expect((newState.messages[1].content as any[])[0]?.text).toBe('Let me check');
+      
+      // Verify the new assistant message was created after tool_end
+      expect(newState.messages[4].role).toBe('assistant');
+      expect((newState.messages[4].content as any[])[0]?.text).toBe('Here are the files:');
+      
+      // Verify currentAssistantMessageId points to the new message
+      expect(newState.currentAssistantMessageId).toBe(newState.messages[4].id);
+    });
+  });
+
+  describe('Rule D: snapshot ends with user_message', () => {
+    it('rehydrates with currentAssistantMessageId cleared (new assistant needed)', () => {
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'New prompt',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // Verify snapshotTailKind is set
+      expect(state.snapshotTailKind).toBe('user_message');
+      
+      // Verify currentAssistantMessageId is cleared
+      expect(state.currentAssistantMessageId).toBeUndefined();
+    });
+
+    it('next text_delta creates a new assistant message', () => {
+      // Start with snapshot ending in user_message
+      let state: AdapterState = {
+        ...baseState,
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            content: [{ type: 'text', text: 'New prompt' }],
+            createdAt: new Date(),
+          },
+        ],
+        isProcessing: true,
+        currentAssistantMessageId: undefined,
+        snapshotTailKind: 'user_message',
+      };
+
+      // Apply text_delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:01.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: 'I understand your question.' },
+      };
+
+      const newState = processEvent(state, deltaEvent);
+
+      // Should have 2 messages (new assistant created)
+      expect(newState.messages).toHaveLength(2);
+      expect(newState.messages[1].role).toBe('assistant');
+      expect((newState.messages[1].content as any[])[0]?.text).toBe('I understand your question.');
+    });
+  });
+
+  describe('Rule E: snapshot with split assistant segments', () => {
+    it('next delta continues segment 2 (tail assistant), not segment 1', () => {
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Complex task',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'I\'ll help with that.',
+          },
+          {
+            kind: 'tool_start',
+            id: 't1',
+            timestamp: '2024-01-01T00:00:02.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+          },
+          {
+            kind: 'tool_end',
+            id: 't2',
+            timestamp: '2024-01-01T00:00:03.000Z',
+            toolName: 'read',
+            toolCallId: 'call-001',
+            success: true,
+            result: 'content',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a2',
+            timestamp: '2024-01-01T00:00:04.000Z',
+            text: 'Based on the file',
+          },
+        ],
+      };
+
+      const state = processEvent(baseState, snapshotEvent);
+
+      // Verify snapshotTailKind is set to assistant_message
+      expect(state.snapshotTailKind).toBe('assistant_message');
+      
+      // Verify currentAssistantMessageId is set to segment 2 (the tail assistant)
+      expect(state.currentAssistantMessageId).toBe('msg-assistant_message-a2');
+      
+      // Verify messages
+      expect(state.messages).toHaveLength(5);
+    });
+
+    it('next text_delta continues segment 2, not segment 1', () => {
+      // Start with snapshot containing split assistant segments
+      let state: AdapterState = {
+        ...baseState,
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            content: [{ type: 'text', text: 'Complex task' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 'a1',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'I\'ll help with that.' }],
+            createdAt: new Date(),
+          },
+          {
+            id: 't1',
+            role: 'tool',
+            name: 'read',
+            content: 'Tool Call',
+            createdAt: new Date(),
+            toolCallId: 'call-001',
+          },
+          {
+            id: 't2',
+            role: 'tool',
+            name: 'read',
+            content: 'Result',
+            createdAt: new Date(),
+            toolCallId: 'call-001',
+            toolResult: 'content',
+            toolSuccess: true,
+          },
+          {
+            id: 'a2',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Based on the file' }],
+            createdAt: new Date(),
+          },
+        ],
+        isProcessing: true,
+        currentAssistantMessageId: 'a2',
+        snapshotTailKind: 'assistant_message',
+      };
+
+      // Apply text_delta
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:05.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: ', here is the answer.' },
+      };
+
+      const newState = processEvent(state, deltaEvent);
+
+      // Should still have 5 messages
+      expect(newState.messages).toHaveLength(5);
+      
+      // Segment 1 should be unchanged
+      expect((newState.messages[1].content as any[])[0]?.text).toBe('I\'ll help with that.');
+      
+      // Segment 2 should be continued
+      expect((newState.messages[4].content as any[])[0]?.text).toBe('Based on the file, here is the answer.');
+    });
+  });
+
+  describe('Snapshot followed by live delta (real transcript_snapshot event)', () => {
+    it('actually applies transcript_snapshot then live delta (not hand-built state)', () => {
+      // Start with base state
+      let state = baseState;
+
+      // Apply REAL transcript_snapshot event first
+      const snapshotEvent: WebUIEvent = {
+        type: 'transcript_snapshot',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        sessionId: 'session-001',
+        isProcessing: true,
+        generatedAt: '2024-01-01T00:00:00.000Z',
+        items: [
+          {
+            kind: 'user_message',
+            id: 'u1',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            text: 'Run ls',
+          },
+          {
+            kind: 'assistant_message',
+            id: 'a1',
+            timestamp: '2024-01-01T00:00:01.000Z',
+            text: 'Let me check',
+          },
+          {
+            kind: 'tool_start',
+            id: 't1',
+            timestamp: '2024-01-01T00:00:02.000Z',
+            toolName: 'bash',
+            toolCallId: 'call-001',
+          },
+          {
+            kind: 'tool_end',
+            id: 't2',
+            timestamp: '2024-01-01T00:00:03.000Z',
+            toolName: 'bash',
+            toolCallId: 'call-001',
+            success: true,
+            result: 'file1.txt',
+          },
+        ],
+      };
+
+      state = processEvent(state, snapshotEvent);
+
+      // Verify rehydration set correct state
+      expect(state.snapshotTailKind).toBe('tool_end');
+      expect(state.currentAssistantMessageId).toBeUndefined();
+      expect(state.messages).toHaveLength(4);
+
+      // Now apply LIVE delta event
+      const deltaEvent: WebUIEvent = {
+        type: 'message_update',
+        timestamp: '2024-01-01T00:00:04.000Z',
+        roomId: '!room:example.com',
+        roomKey: 'test-room',
+        turnId: 'turn-001',
+        sessionId: 'session-001',
+        role: 'assistant',
+        content: { type: 'text_delta', delta: 'Here are the files:' },
+      };
+
+      state = processEvent(state, deltaEvent);
+
+      // CRITICAL: Should have 5 messages (new assistant after tool_end)
+      expect(state.messages).toHaveLength(5);
+      
+      // Old assistant unchanged
+      expect((state.messages[1].content as any[])[0]?.text).toBe('Let me check');
+      
+      // New assistant created
+      expect(state.messages[4].role).toBe('assistant');
+      expect((state.messages[4].content as any[])[0]?.text).toBe('Here are the files:');
+    });
+  });
+});
+
 describe('Live View vs Reload Consistency', () => {
   it('live view message order matches what transcript would produce', () => {
     // Simulate live view

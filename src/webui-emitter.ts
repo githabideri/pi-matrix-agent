@@ -15,7 +15,7 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Response } from "express";
 import type { LiveTurnBuffer } from "./room-state.js";
-import { buildLiveTranscript, liveTurnBufferToTranscriptItems, mergeTranscriptItems } from "./transcript.js";
+import { buildAuthoritativeTranscript } from "./transcript.js";
 import type { TranscriptSnapshotItem, WebUIEvent } from "./webui-types.js";
 import { generateTurnId } from "./webui-types.js";
 
@@ -118,36 +118,14 @@ export class WebUIEmitter {
    */
   private async emitTranscriptSnapshot(): Promise<void> {
     try {
-      // Build the authoritative transcript items
-      let items: TranscriptSnapshotItem[] = [];
-
-      if (this.isProcessing && this.liveTurnBuffer) {
-        // Room is processing: merge persisted + live items
-        let persistedItems: TranscriptSnapshotItem[] = [];
-
-        if (this.sessionFile && this.workingDirectory) {
-          try {
-            const persistedTranscript = await buildLiveTranscript(this.sessionId, this.sessionFile, {
-              baseDir: this.workingDirectory,
-            });
-            persistedItems = persistedTranscript.items as TranscriptSnapshotItem[];
-          } catch (err) {
-            console.warn(`[WebUIEmitter] Could not read persisted transcript:`, err);
-          }
-        }
-
-        // Get live items from buffer
-        const liveItems = liveTurnBufferToTranscriptItems(this.liveTurnBuffer) as TranscriptSnapshotItem[];
-
-        // Merge with deduplication
-        items = mergeTranscriptItems(persistedItems as any, liveItems as any) as TranscriptSnapshotItem[];
-      } else if (this.sessionFile && this.workingDirectory) {
-        // Room not processing: use persisted transcript only
-        const transcript = await buildLiveTranscript(this.sessionId, this.sessionFile, {
-          baseDir: this.workingDirectory,
-        });
-        items = transcript.items as TranscriptSnapshotItem[];
-      }
+      // Use the canonical builder for authoritative transcript
+      const items = await buildAuthoritativeTranscript(
+        this.sessionId,
+        this.sessionFile,
+        this.liveTurnBuffer,
+        this.isProcessing ?? false,
+        { baseDir: this.workingDirectory },
+      );
 
       // Build relative session path
       let relativeSessionPath: string | undefined;
@@ -166,7 +144,7 @@ export class WebUIEmitter {
         sessionId: this.sessionId,
         relativeSessionPath,
         isProcessing: this.isProcessing ?? false,
-        items,
+        items: items as TranscriptSnapshotItem[],
         generatedAt: new Date().toISOString(),
         timestamp: new Date().toISOString(),
       });
