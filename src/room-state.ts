@@ -24,6 +24,11 @@ export interface RoomSnapshot {
  * accurate transcript reconstruction. Accumulation fields (`assistantText`, etc.)
  * are kept for backwards compatibility and convenience but are derived from
  * or synchronized with the ordered items.
+ *
+ * SEGMENT TRACKING:
+ * Assistant and thinking output are treated as segments, not a single forever-open item.
+ * When tool activity occurs, the current assistant/thinking segment is "closed" and
+ * subsequent deltas create new items. This preserves the real event ordering.
  */
 export interface LiveTurnBuffer {
   /** Whether a turn is currently active */
@@ -57,6 +62,18 @@ export interface LiveTurnBuffer {
   toolStarts: LiveToolStartItem[];
   /** Live tool end items (legacy bucket, for backwards compatibility) */
   toolEnds: LiveToolEndItem[];
+  /**
+   * ID of the currently open assistant segment.
+   * When set, assistant text deltas append to this item.
+   * Cleared when tool activity occurs, causing new deltas to create new items.
+   */
+  currentAssistantItemId?: string;
+  /**
+   * ID of the currently open thinking segment.
+   * When set, thinking text deltas append to this item.
+   * Cleared when tool activity occurs, causing new deltas to create new items.
+   */
+  currentThinkingItemId?: string;
 }
 
 /**
@@ -117,6 +134,8 @@ export function createEmptyLiveTurnBuffer(): LiveTurnBuffer {
     thinkingTimestamp: undefined,
     toolStarts: [],
     toolEnds: [],
+    currentAssistantItemId: undefined,
+    currentThinkingItemId: undefined,
   };
 }
 
@@ -368,11 +387,16 @@ export class RoomStateManager {
 
   /**
    * Reset the live turn buffer for a room (called on turn_start).
+   * Clears all state including open segment tracking.
    */
   resetLiveTurnBuffer(roomId: string): void {
     const state = this.live.get(roomId);
     if (state) {
-      state.liveTurnBuffer = createEmptyLiveTurnBuffer();
+      const buffer = createEmptyLiveTurnBuffer();
+      // Explicitly ensure segment tracking is cleared
+      buffer.currentAssistantItemId = undefined;
+      buffer.currentThinkingItemId = undefined;
+      state.liveTurnBuffer = buffer;
     }
   }
 
@@ -403,83 +427,131 @@ export class RoomStateManager {
 
   /**
    * Append assistant text to the live turn buffer.
-   * Updates the existing assistant item in-place or creates a new one.
+   * Appends to the currently open assistant segment if one exists,
+   * otherwise creates a new assistant_message item.
+   * Tool activity closes the current segment, causing subsequent deltas to create new items.
    * @param eventTimestamp The original event timestamp, if available
    */
   appendAssistantText(roomId: string, delta: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
-    if (state?.liveTurnBuffer) {
-      // Find existing assistant item in the ordered list
-      const existingItem = state.liveTurnBuffer.items.find((item) => item.kind === "assistant_message");
+    if (!state?.liveTurnBuffer) return;
 
+    const buffer = state.liveTurnBuffer;
+    const ts = eventTimestamp || new Date().toISOString();
+
+    // Check if there's an open assistant segment to append to
+    if (buffer.currentAssistantItemId) {
+      // Find and append to the open segment
+      const existingItem = buffer.items.find(
+        (item) => item.kind === "assistant_message" && item.id === buffer.currentAssistantItemId,
+      );
       if (existingItem) {
-        // Update existing item in-place
         existingItem.text = (existingItem.text || "") + delta;
       } else {
-        // Create new assistant item
-        const ts = eventTimestamp || new Date().toISOString();
-        state.liveTurnBuffer.items.push({
-          kind: "assistant_message",
-          id: `live-assistant-${state.liveTurnBuffer.turnId || Date.now()}`,
-          timestamp: ts,
-          text: delta,
-        });
-        // Set legacy timestamp on first delta
-        if (!state.liveTurnBuffer.assistantMessageTimestamp) {
-          state.liveTurnBuffer.assistantMessageTimestamp = ts;
-        }
+        // Segment ID exists but item not found - create new segment
+        this._createAssistantSegment(buffer, delta, ts);
       }
-      // Update convenience field
-      state.liveTurnBuffer.assistantText += delta;
+    } else {
+      // No open segment - create a new one
+      this._createAssistantSegment(buffer, delta, ts);
+    }
+
+    // Update convenience field
+    buffer.assistantText += delta;
+  }
+
+  /**
+   * Create a new assistant segment item and mark it as the current open segment.
+   */
+  private _createAssistantSegment(buffer: LiveTurnBuffer, text: string, timestamp: string): void {
+    const id = `live-assistant-${buffer.turnId || Date.now()}-${Date.now()}`;
+    buffer.items.push({
+      kind: "assistant_message",
+      id,
+      timestamp,
+      text,
+    });
+    // Mark this as the currently open assistant segment
+    buffer.currentAssistantItemId = id;
+    // Set legacy timestamp on first delta
+    if (!buffer.assistantMessageTimestamp) {
+      buffer.assistantMessageTimestamp = timestamp;
     }
   }
 
   /**
    * Append thinking text to the live turn buffer.
-   * Updates the existing thinking item in-place or creates a new one.
+   * Appends to the currently open thinking segment if one exists,
+   * otherwise creates a new thinking item.
+   * Tool activity closes the current segment, causing subsequent deltas to create new items.
    * @param eventTimestamp The original event timestamp, if available
    */
   appendThinkingText(roomId: string, delta: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
-    if (state?.liveTurnBuffer) {
-      // Find existing thinking item in the ordered list
-      const existingItem = state.liveTurnBuffer.items.find((item) => item.kind === "thinking");
+    if (!state?.liveTurnBuffer) return;
 
+    const buffer = state.liveTurnBuffer;
+    const ts = eventTimestamp || new Date().toISOString();
+
+    // Check if there's an open thinking segment to append to
+    if (buffer.currentThinkingItemId) {
+      // Find and append to the open segment
+      const existingItem = buffer.items.find(
+        (item) => item.kind === "thinking" && item.id === buffer.currentThinkingItemId,
+      );
       if (existingItem) {
-        // Update existing item in-place
         existingItem.text = (existingItem.text || "") + delta;
       } else {
-        // Create new thinking item
-        const ts = eventTimestamp || new Date().toISOString();
-        state.liveTurnBuffer.items.push({
-          kind: "thinking",
-          id: `live-thinking-${state.liveTurnBuffer.turnId || Date.now()}`,
-          timestamp: ts,
-          text: delta,
-        });
-        // Set legacy timestamp on first delta
-        if (!state.liveTurnBuffer.thinkingTimestamp) {
-          state.liveTurnBuffer.thinkingTimestamp = ts;
-        }
+        // Segment ID exists but item not found - create new segment
+        this._createThinkingSegment(buffer, delta, ts);
       }
-      // Update convenience field
-      state.liveTurnBuffer.thinkingText += delta;
+    } else {
+      // No open segment - create a new one
+      this._createThinkingSegment(buffer, delta, ts);
+    }
+
+    // Update convenience field
+    buffer.thinkingText += delta;
+  }
+
+  /**
+   * Create a new thinking segment item and mark it as the current open segment.
+   */
+  private _createThinkingSegment(buffer: LiveTurnBuffer, text: string, timestamp: string): void {
+    const id = `live-thinking-${buffer.turnId || Date.now()}-${Date.now()}`;
+    buffer.items.push({
+      kind: "thinking",
+      id,
+      timestamp,
+      text,
+    });
+    // Mark this as the currently open thinking segment
+    buffer.currentThinkingItemId = id;
+    // Set legacy timestamp on first delta
+    if (!buffer.thinkingTimestamp) {
+      buffer.thinkingTimestamp = timestamp;
     }
   }
 
   /**
    * Add a tool start item to the live turn buffer.
    * Adds to both the ordered items list and the legacy toolStarts bucket.
+   * Closes any open assistant/thinking segments so subsequent deltas create new items.
    * @param eventTimestamp The original event timestamp, if available
    */
   addToolStart(roomId: string, toolCallId: string, toolName: string, toolArgs?: string, eventTimestamp?: string): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
+      const buffer = state.liveTurnBuffer;
       const ts = eventTimestamp || new Date().toISOString();
       const id = `tool-start-${toolCallId}`;
 
+      // Close any open assistant/thinking segments
+      buffer.currentAssistantItemId = undefined;
+      buffer.currentThinkingItemId = undefined;
+
       // Add to ordered items list
-      state.liveTurnBuffer.items.push({
+      buffer.items.push({
         kind: "tool_start",
         id,
         timestamp: ts,
@@ -489,7 +561,7 @@ export class RoomStateManager {
       });
 
       // Also add to legacy bucket for backwards compatibility
-      state.liveTurnBuffer.toolStarts.push({
+      buffer.toolStarts.push({
         id,
         timestamp: ts,
         toolName,
@@ -502,6 +574,7 @@ export class RoomStateManager {
   /**
    * Add a tool end item to the live turn buffer.
    * Adds to both the ordered items list and the legacy toolEnds bucket.
+   * Keeps assistant/thinking segments closed - subsequent deltas will create new items.
    * @param eventTimestamp The original event timestamp, if available
    */
   addToolEnd(
@@ -515,11 +588,16 @@ export class RoomStateManager {
   ): void {
     const state = this.live.get(roomId);
     if (state?.liveTurnBuffer) {
+      const buffer = state.liveTurnBuffer;
       const ts = eventTimestamp || new Date().toISOString();
       const id = `tool-end-${toolCallId}`;
 
+      // Keep segments closed - subsequent deltas will create new items
+      buffer.currentAssistantItemId = undefined;
+      buffer.currentThinkingItemId = undefined;
+
       // Add to ordered items list
-      state.liveTurnBuffer.items.push({
+      buffer.items.push({
         kind: "tool_end",
         id,
         timestamp: ts,
@@ -531,7 +609,7 @@ export class RoomStateManager {
       });
 
       // Also add to legacy bucket for backwards compatibility
-      state.liveTurnBuffer.toolEnds.push({
+      buffer.toolEnds.push({
         id,
         timestamp: ts,
         toolName,

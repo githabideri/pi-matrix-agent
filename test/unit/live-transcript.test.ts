@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createEmptyLiveTurnBuffer, type LiveTurnBuffer } from "../../src/room-state.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createEmptyLiveTurnBuffer, type LiveTurnBuffer, RoomStateManager } from "../../src/room-state.js";
 import { liveTurnBufferToTranscriptItems, mergeTranscriptItems, type TranscriptItem } from "../../src/transcript.js";
 
 /**
@@ -475,5 +475,345 @@ describe("Timestamp fidelity", () => {
     expect(items[0].timestamp).toBe("2024-01-01T00:00:00.123Z");
     expect(items[1].timestamp).toBe("2024-01-01T00:00:01.456Z");
     expect(items[2].timestamp).toBe("2024-01-01T00:00:02.789Z");
+  });
+});
+
+describe("Live turn buffer mutation path - Ordered segments", () => {
+  let roomStateManager: RoomStateManager;
+  const testRoomId = "!test:example.com";
+
+  beforeEach(() => {
+    roomStateManager = new RoomStateManager();
+    // Create a mock session and room state
+    const mockSession = {
+      sessionId: "test-session-id",
+      dispose: () => {},
+    } as any;
+    roomStateManager.getOrCreate(testRoomId, mockSession);
+  });
+
+  describe("A. Assistant continuation after tools", () => {
+    it("creates separate assistant segments before and after tool activity", () => {
+      // Reset/start turn with user prompt
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+      roomStateManager.updateLiveTurnStart(testRoomId, "turn-1", "What files are here?");
+
+      // Assistant text delta "Let me check"
+      roomStateManager.appendAssistantText(testRoomId, "Let me check");
+
+      // tool_start
+      roomStateManager.addToolStart(testRoomId, "tc1", "bash", '{"command": "ls"}');
+
+      // tool_end
+      roomStateManager.addToolEnd(testRoomId, "tc1", "bash", true, "file1.txt\nfile2.txt");
+
+      // Assistant text delta "Here are the files"
+      roomStateManager.appendAssistantText(testRoomId, "Here are the files");
+
+      // Get the buffer and verify
+      const buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer).toBeDefined();
+
+      const items = buffer!.items;
+
+      // Expected ordered live items:
+      // 0: user_message
+      // 1: assistant_message "Let me check"
+      // 2: tool_start
+      // 3: tool_end
+      // 4: assistant_message "Here are the files"
+      expect(items).toHaveLength(5);
+
+      expect(items[0].kind).toBe("user_message");
+      expect(items[0].text).toBe("What files are here?");
+
+      expect(items[1].kind).toBe("assistant_message");
+      expect(items[1].text).toBe("Let me check");
+
+      expect(items[2].kind).toBe("tool_start");
+      expect(items[2].toolName).toBe("bash");
+
+      expect(items[3].kind).toBe("tool_end");
+      expect(items[3].success).toBe(true);
+
+      expect(items[4].kind).toBe("assistant_message");
+      expect(items[4].text).toBe("Here are the files");
+
+      // Verify they are separate items, not merged
+      const assistantItems = items.filter((i) => i.kind === "assistant_message");
+      expect(assistantItems).toHaveLength(2);
+      expect(assistantItems[0].text).toBe("Let me check");
+      expect(assistantItems[1].text).toBe("Here are the files");
+    });
+  });
+
+  describe("B. Thinking continuation after tools", () => {
+    it("creates separate thinking segments before and after tool activity", () => {
+      // Reset/start turn with user prompt
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+      roomStateManager.updateLiveTurnStart(testRoomId, "turn-2", "Analyze this");
+
+      // Thinking delta "I need to think"
+      roomStateManager.appendThinkingText(testRoomId, "I need to think");
+
+      // tool_start
+      roomStateManager.addToolStart(testRoomId, "tc1", "read", '{"path": "file.txt"}');
+
+      // tool_end
+      roomStateManager.addToolEnd(testRoomId, "tc1", "read", true, "content");
+
+      // Thinking delta "Now I understand"
+      roomStateManager.appendThinkingText(testRoomId, "Now I understand");
+
+      // Get the buffer and verify
+      const buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer).toBeDefined();
+
+      const items = buffer!.items;
+
+      // Expected ordered live items:
+      // 0: user_message
+      // 1: thinking "I need to think"
+      // 2: tool_start
+      // 3: tool_end
+      // 4: thinking "Now I understand"
+      expect(items).toHaveLength(5);
+
+      expect(items[0].kind).toBe("user_message");
+
+      expect(items[1].kind).toBe("thinking");
+      expect(items[1].text).toBe("I need to think");
+
+      expect(items[2].kind).toBe("tool_start");
+
+      expect(items[3].kind).toBe("tool_end");
+
+      expect(items[4].kind).toBe("thinking");
+      expect(items[4].text).toBe("Now I understand");
+
+      // Verify they are separate items, not merged
+      const thinkingItems = items.filter((i) => i.kind === "thinking");
+      expect(thinkingItems).toHaveLength(2);
+      expect(thinkingItems[0].text).toBe("I need to think");
+      expect(thinkingItems[1].text).toBe("Now I understand");
+    });
+  });
+
+  describe("C. Consecutive assistant deltas before any tool", () => {
+    it("accumulates consecutive deltas into a single assistant segment", () => {
+      // Reset/start turn
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+      roomStateManager.updateLiveTurnStart(testRoomId, "turn-3", "Hello");
+
+      // Assistant delta "Hello"
+      roomStateManager.appendAssistantText(testRoomId, "Hello");
+
+      // Assistant delta " world"
+      roomStateManager.appendAssistantText(testRoomId, " world");
+
+      // Get the buffer and verify
+      const buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer).toBeDefined();
+
+      const items = buffer!.items;
+
+      // Expected: single assistant_message item with "Hello world"
+      expect(items).toHaveLength(2); // user_message + assistant_message
+
+      expect(items[0].kind).toBe("user_message");
+
+      expect(items[1].kind).toBe("assistant_message");
+      expect(items[1].text).toBe("Hello world");
+
+      // Verify only one assistant item exists
+      const assistantItems = items.filter((i) => i.kind === "assistant_message");
+      expect(assistantItems).toHaveLength(1);
+      expect(assistantItems[0].text).toBe("Hello world");
+    });
+  });
+
+  describe("D. Transcript helper on mutated buffer", () => {
+    it("preserves order when converting mutated buffer to transcript items", () => {
+      // Build buffer through room-state mutation methods
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+      roomStateManager.updateLiveTurnStart(testRoomId, "turn-4", "List files");
+      roomStateManager.appendAssistantText(testRoomId, "Sure");
+      roomStateManager.addToolStart(testRoomId, "tc1", "bash", '{"command": "ls"}');
+      roomStateManager.addToolEnd(testRoomId, "tc1", "bash", true, "file1.txt");
+      roomStateManager.appendAssistantText(testRoomId, "Here they are");
+
+      // Convert to transcript items
+      const buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      const transcriptItems = liveTurnBufferToTranscriptItems(buffer);
+
+      // Verify order is preserved
+      expect(transcriptItems).toHaveLength(5);
+      expect(transcriptItems[0].kind).toBe("user_message");
+      expect(transcriptItems[1].kind).toBe("assistant_message");
+      expect(transcriptItems[1].text).toBe("Sure");
+      expect(transcriptItems[2].kind).toBe("tool_start");
+      expect(transcriptItems[3].kind).toBe("tool_end");
+      expect(transcriptItems[4].kind).toBe("assistant_message");
+      expect(transcriptItems[4].text).toBe("Here they are");
+    });
+  });
+
+  describe("E. Complex interleaved sequence", () => {
+    it("handles multiple tool calls with assistant text interspersed", () => {
+      // Reset/start turn
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+      roomStateManager.updateLiveTurnStart(testRoomId, "turn-5", "Complex task");
+
+      // Assistant introduces
+      roomStateManager.appendAssistantText(testRoomId, "I'll help with that. ");
+
+      // First tool
+      roomStateManager.addToolStart(testRoomId, "tc1", "read", '{"path": "a.txt"}');
+      roomStateManager.addToolEnd(testRoomId, "tc1", "read", true, "content A");
+
+      // Assistant commentary
+      roomStateManager.appendAssistantText(testRoomId, "First file done. ");
+
+      // Second tool
+      roomStateManager.addToolStart(testRoomId, "tc2", "read", '{"path": "b.txt"}');
+      roomStateManager.addToolEnd(testRoomId, "tc2", "read", true, "content B");
+
+      // Assistant concludes
+      roomStateManager.appendAssistantText(testRoomId, "Both files processed.");
+
+      // Get the buffer and verify
+      const buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer).toBeDefined();
+
+      const items = buffer!.items;
+
+      // Expected ordered live items:
+      // 0: user_message
+      // 1: assistant_message "I'll help with that. "
+      // 2: tool_start (tc1)
+      // 3: tool_end (tc1)
+      // 4: assistant_message "First file done. "
+      // 5: tool_start (tc2)
+      // 6: tool_end (tc2)
+      // 7: assistant_message "Both files processed."
+      expect(items).toHaveLength(8);
+
+      // Verify assistant segments are separate
+      const assistantItems = items.filter((i) => i.kind === "assistant_message");
+      expect(assistantItems).toHaveLength(3);
+      expect(assistantItems[0].text).toBe("I'll help with that. ");
+      expect(assistantItems[1].text).toBe("First file done. ");
+      expect(assistantItems[2].text).toBe("Both files processed.");
+
+      // Verify interleaving is correct
+      expect(items[1].kind).toBe("assistant_message");
+      expect(items[2].kind).toBe("tool_start");
+      expect(items[3].kind).toBe("tool_end");
+      expect(items[4].kind).toBe("assistant_message");
+      expect(items[5].kind).toBe("tool_start");
+      expect(items[6].kind).toBe("tool_end");
+      expect(items[7].kind).toBe("assistant_message");
+    });
+  });
+
+  describe("F. Segment tracking state", () => {
+    it("correctly tracks and clears currentAssistantItemId", () => {
+      // Reset/start turn
+      roomStateManager.resetLiveTurnBuffer(testRoomId);
+
+      // Initially no open segment
+      let buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer?.currentAssistantItemId).toBeUndefined();
+
+      // After assistant text, segment is open
+      roomStateManager.appendAssistantText(testRoomId, "Hello");
+      buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer?.currentAssistantItemId).toBeDefined();
+
+      // After tool_start, segment is closed
+      roomStateManager.addToolStart(testRoomId, "tc1", "bash", "{}");
+      buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer?.currentAssistantItemId).toBeUndefined();
+
+      // After new assistant text, segment is open again
+      roomStateManager.appendAssistantText(testRoomId, "World");
+      buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer?.currentAssistantItemId).toBeDefined();
+
+      // Verify there are now TWO assistant items (segment was closed, new one created)
+      const assistantItems = buffer!.items.filter((i) => i.kind === "assistant_message");
+      expect(assistantItems).toHaveLength(2);
+
+      // After tool_end, segment remains closed
+      roomStateManager.addToolEnd(testRoomId, "tc1", "bash", true, "result");
+      buffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+      expect(buffer?.currentAssistantItemId).toBeUndefined();
+    });
+  });
+});
+
+describe("Live transcript route - Merged output ordering", () => {
+  it("returns merged persisted + live items in correct order during processing", () => {
+    // Simulate persisted items from prior conversation
+    const persistedItems: TranscriptItem[] = [
+      { kind: "user_message", id: "p1", text: "Previous question", timestamp: "2024-01-01T00:00:00.000Z" },
+      { kind: "assistant_message", id: "p2", text: "Previous answer", timestamp: "2024-01-01T00:00:01.000Z" },
+    ];
+
+    // Simulate live buffer with current turn (built through mutation path)
+    const roomStateManager = new RoomStateManager();
+    const testRoomId = "!test:example.com";
+
+    // Create a mock session and room state
+    const mockSession = {
+      sessionId: "test-session-id",
+      dispose: () => {},
+    } as any;
+    roomStateManager.getOrCreate(testRoomId, mockSession);
+
+    roomStateManager.resetLiveTurnBuffer(testRoomId);
+    roomStateManager.updateLiveTurnStart(testRoomId, "turn-live", "Current prompt");
+    roomStateManager.appendAssistantText(testRoomId, "Processing...");
+    roomStateManager.addToolStart(testRoomId, "tc1", "bash", '{"command": "ls"}');
+    roomStateManager.addToolEnd(testRoomId, "tc1", "bash", true, "file1.txt");
+    roomStateManager.appendAssistantText(testRoomId, "Done.");
+
+    const liveBuffer = roomStateManager.getLiveTurnBuffer(testRoomId);
+    const liveItems = liveTurnBufferToTranscriptItems(liveBuffer);
+
+    // Merge persisted and live items
+    const merged = mergeTranscriptItems(persistedItems, liveItems);
+
+    // Verify the merged output:
+    // 0: user_message "Previous question" (persisted)
+    // 1: assistant_message "Previous answer" (persisted)
+    // 2: user_message "Current prompt" (live, duplicate of p3 removed)
+    // 3: assistant_message "Processing..." (live)
+    // 4: tool_start (live)
+    // 5: tool_end (live)
+    // 6: assistant_message "Done." (live)
+    expect(merged).toHaveLength(7);
+
+    // Persisted items preserved
+    expect(merged[0].kind).toBe("user_message");
+    expect(merged[0].text).toBe("Previous question");
+    expect(merged[1].kind).toBe("assistant_message");
+    expect(merged[1].text).toBe("Previous answer");
+
+    // Live items appended in correct order
+    expect(merged[2].kind).toBe("user_message");
+    expect(merged[2].text).toBe("Current prompt");
+    expect(merged[3].kind).toBe("assistant_message");
+    expect(merged[3].text).toBe("Processing...");
+    expect(merged[4].kind).toBe("tool_start");
+    expect(merged[5].kind).toBe("tool_end");
+    expect(merged[6].kind).toBe("assistant_message");
+    expect(merged[6].text).toBe("Done.");
+
+    // Verify the two assistant messages from the live turn are separate
+    const liveAssistantItems = merged.filter((i, idx) => idx >= 2 && i.kind === "assistant_message");
+    expect(liveAssistantItems).toHaveLength(2);
+    expect(liveAssistantItems[0].text).toBe("Processing...");
+    expect(liveAssistantItems[1].text).toBe("Done.");
   });
 });
