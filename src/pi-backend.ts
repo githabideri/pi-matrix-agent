@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import { join } from "node:path";
 import type { Api, Model } from "@mariozechner/pi-ai";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
+import { createSendMediaTool } from "./media-tool.js";
 import { RoomModelManager } from "./room-model-manager.js";
 import { type LiveRoomState, RoomStateManager } from "./room-state.js";
 import type {
@@ -10,6 +11,7 @@ import type {
   ModelClearResult,
   ModelStatus,
   ModelSwitchResult,
+  ReplySink,
   RoomModelState,
   SettingsJson,
 } from "./types.js";
@@ -18,6 +20,7 @@ export interface PiSessionBackendOptions {
   sessionBaseDir: string;
   cwd?: string;
   agentDir: string;
+  sink?: ReplySink;
 }
 
 export class PiSessionBackend {
@@ -26,6 +29,7 @@ export class PiSessionBackend {
   private agentDir: string;
   private roomStateManager: RoomStateManager;
   private roomModelManager: RoomModelManager;
+  private sink?: ReplySink;
 
   // Serialization mutex for critical sections (session bind, model reconcile, global default restore)
   // This prevents race conditions where one room could observe another room's temporary settings.json mutation
@@ -51,6 +55,7 @@ export class PiSessionBackend {
     this.sessionBaseDir = options.sessionBaseDir;
     this.cwd = options.cwd ?? process.cwd();
     this.agentDir = options.agentDir;
+    this.sink = options.sink;
     this.roomStateManager = new RoomStateManager();
     this.roomModelManager = new RoomModelManager(this.agentDir);
 
@@ -102,6 +107,21 @@ export class PiSessionBackend {
     const authStorage = AuthStorage.create(authPath);
     const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
 
+    // Build custom tools (sendMedia bound to this room)
+    const customTools: ToolDefinition<any>[] = [];
+    if (this.sink) {
+      const sendMediaTool = createSendMediaTool(async (url: string, caption?: string) => {
+        await this.sink!.sendMedia(
+          roomId,
+          "$", // placeholder — threading not implemented
+          url,
+          caption ? { caption } : undefined,
+        );
+        return `Media sent successfully: ${url}`;
+      });
+      customTools.push(sendMediaTool);
+    }
+
     // Create the agent session with explicit agentDir
     const { session, modelFallbackMessage } = await createAgentSession({
       sessionManager,
@@ -109,6 +129,7 @@ export class PiSessionBackend {
       modelRegistry,
       cwd: this.cwd,
       agentDir: this.agentDir,
+      customTools: customTools.length > 0 ? customTools : undefined,
     });
 
     if (modelFallbackMessage) {
@@ -559,6 +580,21 @@ export class PiSessionBackend {
       const authStorage = AuthStorage.create(authPath);
       const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
 
+      // Build custom tools (sendMedia bound to this room)
+      const customTools: ToolDefinition<any>[] = [];
+      if (this.sink) {
+        const sendMediaTool = createSendMediaTool(async (url: string, caption?: string) => {
+          await this.sink!.sendMedia(
+            roomId,
+            "$", // placeholder — threading not implemented
+            url,
+            caption ? { caption } : undefined,
+          );
+          return `Media sent successfully: ${url}`;
+        });
+        customTools.push(sendMediaTool);
+      }
+
       // Step 7: Create the new agent session with explicit agentDir
       const { session, modelFallbackMessage } = await createAgentSession({
         sessionManager,
@@ -566,6 +602,7 @@ export class PiSessionBackend {
         modelRegistry,
         cwd: this.cwd,
         agentDir: this.agentDir,
+        customTools: customTools.length > 0 ? customTools : undefined,
       });
 
       if (modelFallbackMessage) {

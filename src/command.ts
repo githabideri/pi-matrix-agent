@@ -74,6 +74,19 @@ export function parseCommand(body: string): ParsedCommand {
       return { kind: "command_model_switch", profile: firstArg };
     }
 
+    // Parse !media: !media <url> [caption]
+    if (commandWord === "media") {
+      const urlAndCaption = commandPart.slice(5).trim(); // strip "media"
+      const parts = urlAndCaption.split(/\s+/);
+      const url = parts[0];
+      const caption = parts.length > 1 ? parts.slice(1).join(" ").trim() : undefined;
+      if (url) {
+        return { kind: "command_media", url, caption };
+      }
+      // !media with no URL -> help
+      return { kind: "command_help" };
+    }
+
     // Parse other known commands (no arguments expected)
     switch (commandWord) {
       case "ping":

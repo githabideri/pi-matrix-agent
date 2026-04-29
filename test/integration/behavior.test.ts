@@ -31,6 +31,7 @@ function createTestSink(): { sink: ReplySink; replies: Array<{ roomId: string; t
     async reply(roomId, _eventId, text) {
       replies.push({ roomId, text });
     },
+    async sendMedia() {},
   };
   return { sink, replies };
 }

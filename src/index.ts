@@ -32,13 +32,6 @@ async function main() {
   // Print effective runtime config
   printRuntimeConfig(config, runtime.controlPort, runtime.controlHost, runtime.controlPublicUrl, runtime.controlAuth);
 
-  // Create pi session backend (stateful, per-room sessions)
-  const piBackend = new PiSessionBackend({
-    sessionBaseDir: config.sessionBaseDir,
-    cwd: config.workingDirectory || process.cwd(),
-    agentDir: config.agentDir,
-  });
-
   // Create Matrix transport
   const transport = new MatrixTransport(
     config.homeserverUrl,
@@ -47,6 +40,15 @@ async function main() {
     config.botUserId,
     config.storageFile,
   );
+
+  // Create pi session backend (stateful, per-room sessions)
+  // Pass transport as sink for media tool integration
+  const piBackend = new PiSessionBackend({
+    sessionBaseDir: config.sessionBaseDir,
+    cwd: config.workingDirectory || process.cwd(),
+    agentDir: config.agentDir,
+    sink: transport,
+  });
 
   // Create control server (pass matrix transport for web UI → Matrix sync)
   const controlServer = new ControlServer(

@@ -29,10 +29,13 @@
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.66.1",
+    "@sinclair/typebox": "^0.34.49",
     "ejs": "^5.0.2",
     "express": "^5.2.1",
+    "file-type": "^21.3.4",
     "marked": "^18.0.2",
     "matrix-bot-sdk": "^0.6.2",
+    "probe-image-size": "^7.2.3",
     "sanitize-html": "^2.17.3"
   },
   "devDependencies": {

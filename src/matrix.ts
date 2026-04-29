@@ -1,7 +1,8 @@
 import { marked } from "marked";
 import { MatrixClient, SimpleFsStorageProvider } from "matrix-bot-sdk";
 import sanitizeHtml from "sanitize-html";
-import type { IncomingMessage, ReplySink } from "./types.js";
+import { probeMedia } from "./media-probe.js";
+import type { IncomingMessage, MediaSendOptions, ReplySink } from "./types.js";
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
 
@@ -9,6 +10,8 @@ export type MessageHandler = (msg: IncomingMessage) => Promise<void>;
  * Type guard that checks if a Matrix message type is accepted (text or notice).
  * Only `m.text` and `m.notice` are passed to the router.
  */
+const MAX_MEDIA_SIZE = 10 * 1024 * 1024; // 10 MB (Synapse default)
+
 export function isAcceptedMatrixMsgType(msgtype: unknown): msgtype is "m.text" | "m.notice" {
   return msgtype === "m.text" || msgtype === "m.notice";
 }
@@ -241,6 +244,178 @@ export class MatrixTransport implements ReplySink {
     });
 
     return sanitizedHtml;
+  }
+
+  async sendMedia(roomId: string, _eventId: string, mediaSource: string, options?: MediaSendOptions): Promise<void> {
+    let mxcUri: string | undefined;
+    let buffer: Buffer;
+    let contentType = "application/octet-stream";
+
+    // Step 1: Get the media data
+    if (mediaSource.startsWith("mxc://")) {
+      // Already uploaded — download from homeserver to get metadata
+      const downloadResult = await this.client.downloadContent(mediaSource);
+      buffer = downloadResult.data;
+      contentType = downloadResult.contentType;
+      mxcUri = mediaSource;
+    } else if (mediaSource.startsWith("http://") || mediaSource.startsWith("https://")) {
+      // Remote URL
+      const response = await fetch(mediaSource);
+      if (!response.ok) {
+        await this.reply(
+          roomId,
+          _eventId,
+          `❌ Failed to send media: URL returned ${response.status} ${response.statusText}`,
+        );
+        return;
+      }
+      buffer = Buffer.from(await response.arrayBuffer());
+      contentType = response.headers.get("content-type") || "application/octet-stream";
+    } else if (mediaSource.startsWith("file://")) {
+      // file:// URI → local file path
+      const localPath = new URL(mediaSource).pathname;
+      const fs = await import("node:fs");
+      if (!fs.existsSync(localPath)) {
+        await this.reply(roomId, _eventId, `❌ Failed to send media: File not found: ${localPath}`);
+        return;
+      }
+      buffer = fs.readFileSync(localPath);
+    } else if (mediaSource.startsWith("/")) {
+      // Local file path
+      const fs = await import("node:fs");
+      if (!fs.existsSync(mediaSource)) {
+        await this.reply(roomId, _eventId, `❌ Failed to send media: File not found: ${mediaSource}`);
+        return;
+      }
+      buffer = fs.readFileSync(mediaSource);
+    } else {
+      await this.reply(
+        roomId,
+        _eventId,
+        `❌ Failed to send media: Invalid media source (expected URL, local path, or mxc:// URI)`,
+      );
+      return;
+    }
+
+    // Step 2: Enforce size limit
+    if (buffer.length > MAX_MEDIA_SIZE) {
+      const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
+      await this.reply(roomId, _eventId, `❌ Failed to send media: File too large (${sizeMB} MB, limit is 10 MB)`);
+      return;
+    }
+
+    // Step 3: Probe metadata
+    let probeInfo: Awaited<ReturnType<typeof probeMedia>>;
+    try {
+      probeInfo = await probeMedia(buffer);
+    } catch (err: any) {
+      await this.reply(roomId, _eventId, `❌ Failed to send media: Could not determine file type (${err.message})`);
+      return;
+    }
+
+    // Use probed mimetype, or fall back to content-type header
+    contentType = probeInfo.mimetype || contentType;
+
+    // Step 4: Upload if we don't have an mxc:// URI yet
+    if (!mxcUri) {
+      const filename = options?.filename || this.guessFilename(mediaSource, contentType);
+      try {
+        mxcUri = await this.client.uploadContent(buffer, contentType, filename);
+      } catch (err: any) {
+        await this.reply(roomId, _eventId, `❌ Failed to send media: Upload rejected by server (${err.message})`);
+        return;
+      }
+    }
+
+    // Step 5: Determine message type
+    const msgtype = options?.msgtype || this.mapTypeToMsgtype(probeInfo.type);
+
+    // Step 6: Build and send the media event
+    const caption = options?.caption || `${probeInfo.type} media`;
+    const filename = options?.filename || this.guessFilename(mediaSource, contentType);
+
+    const baseContent: Record<string, unknown> = {
+      msgtype: msgtype,
+      body: caption,
+      filename: filename,
+      url: mxcUri,
+    };
+
+    // Build info block
+    const info: Record<string, unknown> = {
+      mimetype: contentType,
+      size: buffer.length,
+    };
+
+    if (probeInfo.width) info.w = probeInfo.width;
+    if (probeInfo.height) info.h = probeInfo.height;
+    if (options?.duration) {
+      info.duration = options.duration;
+    } else if (probeInfo.duration) {
+      info.duration = probeInfo.duration;
+    }
+
+    baseContent.info = info;
+
+    try {
+      await this.client.sendMessage(roomId, baseContent);
+    } catch (err: any) {
+      await this.reply(roomId, _eventId, `❌ Failed to send media: Could not send message (${err.message})`);
+    }
+  }
+
+  private guessFilename(source: string, mime: string): string {
+    if (source.startsWith("http")) {
+      // Extract filename from URL path
+      try {
+        const url = new URL(source);
+        const pathParts = url.pathname.split("/");
+        const lastPart = pathParts[pathParts.length - 1];
+        if (lastPart?.includes(".")) {
+          return lastPart;
+        }
+      } catch {
+        // URL parsing failed
+      }
+    }
+    // Fallback: use extension from MIME type
+    const ext = this.mimeToExtension(mime);
+    return `media.${ext}`;
+  }
+
+  private mimeToExtension(mime: string): string {
+    const map: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+      "image/bmp": "bmp",
+      "image/tiff": "tiff",
+      "image/svg+xml": "svg",
+      "image/x-icon": "ico",
+      "image/avif": "avif",
+      "video/mp4": "mp4",
+      "video/webm": "webm",
+      "video/ogg": "ogv",
+      "video/quicktime": "mov",
+      "video/x-matroska": "mkv",
+      "audio/mpeg": "mp3",
+      "audio/flac": "flac",
+      "audio/ogg": "oga",
+      "audio/wav": "wav",
+      "audio/m4a": "m4a",
+      "audio/opus": "opus",
+    };
+    return map[mime] || "bin";
+  }
+
+  private mapTypeToMsgtype(type: "image" | "video" | "audio"): "m.image" | "m.video" | "m.audio" {
+    const map: Record<"image" | "video" | "audio", "m.image" | "m.video" | "m.audio"> = {
+      image: "m.image",
+      video: "m.video",
+      audio: "m.audio",
+    };
+    return map[type];
   }
 
   async stop(): Promise<void> {

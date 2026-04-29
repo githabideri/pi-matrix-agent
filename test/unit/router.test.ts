@@ -9,6 +9,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -42,6 +43,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -75,6 +77,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -108,6 +111,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -141,6 +145,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -174,6 +179,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -208,6 +214,7 @@ describe("routeMessage", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -251,6 +258,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -296,6 +304,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -340,6 +349,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -384,6 +394,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -429,6 +440,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -469,6 +481,7 @@ describe("routeMessage model commands", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -508,6 +521,7 @@ describe("routeMessage model clear command", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -556,6 +570,7 @@ describe("routeMessage model clear command", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -605,6 +620,7 @@ describe("routeMessage model clear command", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -655,6 +671,7 @@ describe("routeMessage model clear command", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -699,6 +716,7 @@ describe("routeMessage model clear command", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const agent: AgentBackend = {
@@ -737,6 +755,7 @@ describe("routeMessage model status with Phase 2 info", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {
@@ -787,6 +806,7 @@ describe("routeMessage model status with Phase 2 info", () => {
       async reply(_roomId, _eventId, text) {
         replies.push(text);
       },
+      sendMedia: async () => {},
     };
 
     const backend: ModelBackend = {

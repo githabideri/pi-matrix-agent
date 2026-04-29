@@ -15,6 +15,7 @@ export type ParsedCommand =
   | { kind: "command_model_status" }
   | { kind: "command_model_switch"; profile: string }
   | { kind: "command_model_clear" }
+  | { kind: "command_media"; url: string; caption?: string }
   | { kind: "chat_prompt"; prompt: string };
 
 export interface AgentBackend {
@@ -78,8 +79,37 @@ export interface InferenceConfig {
   maxTokens?: number;
 }
 
+// Media types for ReplySink.sendMedia()
+
+export type MediaMessageType = "m.image" | "m.video" | "m.audio";
+
+export interface MediaSendOptions {
+  /** Caption shown below the media in Matrix clients */
+  caption?: string;
+  /** Original filename (used for download). Auto-detected if omitted. */
+  filename?: string;
+  /** Explicit message type override. Auto-detected from MIME type if omitted. */
+  msgtype?: MediaMessageType;
+  /** Duration in milliseconds (for audio/video). Auto-detected via ffprobe if omitted. */
+  duration?: number;
+}
+
+export interface MediaMetadata {
+  mimetype: string;
+  size: number;
+  width?: number;
+  height?: number;
+  duration?: number; // milliseconds
+}
+
 export interface ReplySink {
-  reply(roomId: string, eventId: string, text: string): Promise<void>;
+  reply(roomId: string, eventId: string, text: string, options?: { webUI?: boolean }): Promise<void>;
+  sendMedia(
+    roomId: string,
+    eventId: string,
+    mediaSource: string, // URL (http/https), local path (/...), or mxc:// URI
+    options?: MediaSendOptions,
+  ): Promise<void>;
 }
 
 export interface RouterConfig {

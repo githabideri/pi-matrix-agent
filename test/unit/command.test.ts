@@ -134,4 +134,25 @@ describe("parseCommand", () => {
   it("parses !m -s as command_model_status", () => {
     expect(parseCommand("!m -s")).toEqual({ kind: "command_model_status" });
   });
+
+  // Media command tests
+  it("parses !media <url>", () => {
+    expect(parseCommand("!media https://example.com/image.png")).toEqual({
+      kind: "command_media",
+      url: "https://example.com/image.png",
+      caption: undefined,
+    });
+  });
+
+  it("parses !media <url> <caption>", () => {
+    expect(parseCommand("!media https://example.com/img.png This is my caption")).toEqual({
+      kind: "command_media",
+      url: "https://example.com/img.png",
+      caption: "This is my caption",
+    });
+  });
+
+  it("parses !media alone as help", () => {
+    expect(parseCommand("!media")).toEqual({ kind: "command_help" });
+  });
 });

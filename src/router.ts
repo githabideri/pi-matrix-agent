@@ -67,6 +67,23 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
       await config.sink.reply(msg.roomId, msg.eventId, "Status: OK");
       return;
 
+    case "command_media": {
+      // sendMedia() is always available on MatrixTransport.
+      // The typeof-check is for test mocks that might not implement it.
+      if (typeof config.sink.sendMedia === "function") {
+        await config.sink.sendMedia(
+          msg.roomId,
+          msg.eventId,
+          command.url,
+          command.caption ? { caption: command.caption } : undefined,
+        );
+        // sendMedia() handles errors internally — it replies in Matrix on failure
+      } else {
+        await config.sink.reply(msg.roomId, msg.eventId, "Media sending not available on this transport.");
+      }
+      return;
+    }
+
     case "command_help":
       await config.sink.reply(
         msg.roomId,
@@ -92,6 +109,8 @@ export async function routeMessage(msg: IncomingMessage, options: RouterOptions)
           "  - Model switch is room-persistent (survives restart and !reset)\n" +
           "  - Does not contaminate global default for other rooms\n" +
           "  - !model --clear removes room override, falls back to global\n" +
+          "\nMedia:\n" +
+          "  !media <url> [caption] - Send an image, video, or audio from a URL\n" +
           "\nNote: Model switch is rejected while a turn is in progress.\n" +
           "\nPlain text messages are sent to pi for inference.",
       );
